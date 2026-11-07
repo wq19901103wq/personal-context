@@ -40,12 +40,12 @@ GitHub 按四库分工：
 
 | 仓库 | 管理方式 | 依赖 |
 | --- | --- | --- |
-| `personal-context` | 个人助理独立库，先保持私有 | 固定提交的 `wechat-reader`；可选读取 DH／RPA 的私有知识 |
-| `wechat-reader` | 原始采集与读取独立库，先保持私有，保留 MIT 署名 | 查询仅标准库；采集依赖通过 `[capture]` 安装 |
-| `wechat-mac-rpa` | 保留现有库与历史 | 与助理使用相同提交的 `wechat-reader`；DH 仍走既有草稿子进程 |
-| `digital-human` | 保留现有库与历史 | 不新增采集职责；实时历史模式可选安装 `personal-context` 及其读取依赖 |
+| `personal-context` | 公开的个人助理独立库 | 固定提交的 `wechat-reader`；可选读取 DH／RPA 的私有知识 |
+| `wechat-reader` | 公开的原始采集与读取独立库，保留 MIT 署名 | 查询仅标准库；采集依赖通过 `[capture]` 安装 |
+| `wechat-mac-rpa` | 保留现有公开库与历史 | 与助理使用相同提交的 `wechat-reader`；DH 仍走既有草稿子进程 |
+| `digital-human` | 保留现有公开库与历史 | 不新增采集职责；实时历史模式可选安装 `personal-context` 及其读取依赖 |
 
-`wechat-reader` 源码只在独立库维护，消费者不保留副本或整个 RPA submodule。助理的 `pyproject.toml` 与 RPA 的 `requirements.txt` 使用相同完整 Git 提交号；升级时一并更新。包未发布到 PyPI，私有依赖安装需要 GitHub 读取权限，HTTPS 认证可通过 `gh auth login`、`gh auth setup-git` 配置。RPA 的 GitHub Actions 需配置仅能读取 `wechat-reader` 的 `WECHAT_READER_TOKEN` secret；外部 fork 无法取得该 secret，因此当前无法独立运行需要私有依赖的测试。
+`wechat-reader` 源码只在独立库维护，消费者不保留副本或整个 RPA submodule。助理的 `pyproject.toml` 与 RPA 的 `requirements.txt` 使用相同完整 Git 提交号；升级时一并更新。包未发布到 PyPI，依赖通过公开 GitHub HTTPS 地址安装，无需 GitHub token。RPA 的 GitHub Actions 与外部 fork 使用相同的匿名安装方式。四库只公开代码与通用样例，聊天记录、数据库、截图、日志、凭据和个人知识材料继续留在本地被 Git 忽略的位置。
 
 每个消费者使用自己的解释器与环境；离线联合开发可安装已检出的本地源码或 wheel。仓库拆分不迁移原始库、不改变服务配置，已安装 wheel 的采集服务继续运行。数据、凭据、日志、截图和备份都留在被 Git 忽略的本地位置。
 

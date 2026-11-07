@@ -49,7 +49,7 @@ flowchart TB
 
 ## 快速开始
 
-需要 Python 3.10+、Git、macOS 或 Linux（使用 `fcntl` 文件锁；原生 Windows 暂不支持）。本库与微信读取库先按私有库管理；安装前需取得两库的读取权限，并执行 `gh auth login`、`gh auth setup-git` 配置 GitHub HTTPS 认证。依赖固定到微信读取库的完整提交号，不从 PyPI 查找同名包。以下本地手动待办、日程与网页无需微信、模型或 MAC：
+需要 Python 3.10+、Git、macOS 或 Linux（使用 `fcntl` 文件锁；原生 Windows 暂不支持）。本库与微信读取库按公开仓库维护，源码和依赖可通过 HTTPS 匿名获取，无需 GitHub token。依赖固定到微信读取库的完整提交号，不从 PyPI 查找同名包。以下本地手动待办、日程与网页无需微信、模型或 MAC：
 
 ```sh
 python3 -m venv .venv
@@ -79,7 +79,7 @@ python3 -m venv .venv
 
 `data/`、数据库、日志、凭据、录音、截图、导出、备份、模型运行目录与缓存均排除在 Git 外。把自己的数据和配置放在 `data/` 或仓库外；示例域名、路径与账号均需自行替换。保存过的来源绑定继续保留，新建数据库需自行绑定知识来源。此仓库没有附带个人数据库、登录凭据或模型运行环境。
 
-代码按四库维护：本仓库 `personal-context` 保存个人助理，`wechat-reader` 单独保存微信原始读取能力，`wechat-mac-rpa` 和 `digital-human` 沿用现有仓库。本库和微信读取库先保持私有；主项目尚未指定开源许可证，微信读取库保留原 RPA 的 MIT 许可。各库依赖与访问条件见 [架构与共用能力](docs/shared-capabilities.md#项目归属与依赖)。
+代码按四库维护：本仓库 `personal-context` 保存个人助理，`wechat-reader` 单独保存微信原始读取能力，`wechat-mac-rpa` 和 `digital-human` 沿用现有仓库。四库均按公开代码库维护；聊天记录、数据库、截图、日志、凭据与个人知识材料保存在本地被 Git 忽略的位置。主项目尚未指定开源许可证，微信读取库保留原 RPA 的 MIT 许可。各库依赖与访问条件见 [架构与共用能力](docs/shared-capabilities.md#项目归属与依赖)。
 
 ## 已实现
 
@@ -283,7 +283,7 @@ python -m personal_assistant stop 1
 
 ## 安装
 
-Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依赖标准库；信息提取和复杂任务另需上述本机 MAC 与 Codex 运行环境。在每个消费者自己的虚拟环境中安装本包；已配置 GitHub HTTPS 读取权限时，安装会自动获取固定版本的微信读取依赖：
+Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依赖标准库；信息提取和复杂任务另需上述本机 MAC 与 Codex 运行环境。在每个消费者自己的虚拟环境中安装本包；安装会通过公开 HTTPS 地址自动获取固定版本的微信读取依赖，无需 GitHub 认证：
 
 ```sh
 .venv/bin/python -m pip install -e /path/to/personal-context
