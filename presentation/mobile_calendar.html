@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>个人助理 · 我的日程</title>
+<link rel="stylesheet" href="/assets/base.css">
+<link rel="stylesheet" href="/assets/calendar.css">
+<link rel="stylesheet" href="/assets/recommendations.css">
+<link rel="stylesheet" href="/assets/briefing.css">
+<style>
+header{padding-bottom:8px}header .actions{margin:0}main{padding-top:12px}h1{font-size:25px}.intro{margin-bottom:20px}.intro p{margin-top:6px}input,textarea,select{font-size:16px}.inline-check{display:flex;align-items:center;gap:8px}.inline-check input{width:auto}.dialog-actions{flex-wrap:wrap}.task-link{display:inline-block;margin-top:14px}#page-error{margin-bottom:12px}
+</style>
+<header><div class="brand"><span class="mark">↗</span>个人助理</div><button id="reload" class="small">刷新</button></header>
+<main>
+  <div class="intro"><h1>我的日程</h1><p id="sync-status" class="muted" role="status">正在读取安排…</p><p class="muted">点一下安排日期，右滑删除，误删可以撤销。</p></div>
+  <p id="page-error" class="error" role="alert"></p>
+  <!-- briefing -->
+<!-- calendar -->
+  <!-- recommendations -->
+  <p class="footer">这是你的私人日程链接，持有链接的人可以查看和调整安排。微信发送 /日程 可再次获取。</p>
+</main>
+<dialog id="task-dialog"><form id="task-form"><h2>调整待办</h2>
+  <label for="task-title">待办内容</label><input id="task-title" required autocomplete="off">
+  <label for="task-notes">说明与进展</label><textarea id="task-notes" rows="3"></textarea>
+  <p id="task-zone" class="muted"></p>
+  <div class="form-row"><div><label for="task-due">截止时间（可选）</label><input id="task-due" type="datetime-local"></div><div><label for="task-wake">下次跟进（可选）</label><input id="task-wake" type="datetime-local"></div></div>
+  <label for="task-status">状态</label><select id="task-status"><option value="open">进行中</option><option value="waiting">等待回复</option><option value="done">已完成</option><option value="cancelled">已取消</option></select>
+  <a id="task-detail" class="task-link" href="#">查看来源、计划与结果 →</a>
+  <p id="task-error" class="error" role="alert"></p>
+  <div class="dialog-actions"><button type="button" data-close="task-dialog">关闭</button><button type="submit" class="primary">保存待办</button></div>
+</form></dialog>
+<div id="toast" hidden role="status"></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const calendarPath=location.pathname.replace(/\/$/,'');
+let state={tasks:[],events:[],sources:{}},editingTask=null,toastTimer;
+function element(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
+function toast(text){showToast(text);}
+function button(text,action,cls='small'){const b=element('button',text,cls);b.type='button';b.onclick=async()=>{b.disabled=true;try{await action();}catch(error){toast(error.message);}finally{b.disabled=false;}};return b;}
+function stamp(value,tz){return value==null?'未指定':new Intl.DateTimeFormat('zh-CN',{timeZone:tz||state.sources.timezone||'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000));}
+function localValue(value,tz){if(value==null)return '';return new Intl.DateTimeFormat('sv-SE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000)).replace(' ','T');}
+async function api(path,data){
+  const suffix=path==='/api/state'?'/data':path.replace(/^\/api/,'');
+  const options=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)};
+  const res=await fetch(calendarPath+suffix,options);const value=await res.json();if(!res.ok)throw Error(value.error||'操作失败');return value;
+}
+function recordEvidence(records,key){const d=element('details');d.dataset.key=key;d.append(element('summary','查看聊天原文'));for(const r of records){const q=element('div',undefined,'evidence');q.append(element('div',(r.actor.display_name||'未知发送者')+' · '+stamp(r.time.recorded_at),'muted'),element('div',r.text,'quote'),element('div','会话 '+r.stream_id+' · 消息 #'+r.id,'ref'));d.append(q);}return d;}
+async function refresh(){try{state=await api('/api/state');await renderCalendar();renderInsights();renderBriefings();$('page-error').textContent='';$('sync-status').textContent='已同步 · '+stamp(Date.now()/1000);}catch(error){$('page-error').textContent=error.message;$('sync-status').textContent='暂时无法同步，请刷新重试。';}}
+function editTask(task){
+  editingTask=task;$('task-title').value=task.description;$('task-notes').value=task.notes;$('task-status').value=task.status;
+  $('task-zone').textContent='时间所在时区：'+task.timezone;$('task-due').value=localValue(task.due_at,task.timezone);$('task-wake').value=localValue(task.wake_at,task.timezone);
+  $('task-detail').href=task.detail_path;$('task-error').textContent='';$('task-dialog').showModal();
+}
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
+$('task-form').onsubmit=async event=>{event.preventDefault();const b=event.submitter;b.disabled=true;try{await api('/api/tasks/'+editingTask.id,{description:$('task-title').value,notes:$('task-notes').value,due_at:$('task-due').value||null,wake_at:$('task-wake').value||null,status:$('task-status').value});$('task-dialog').close();await refresh();toast('待办已保存');}catch(error){$('task-error').textContent=error.message;}finally{b.disabled=false;}};
+$('reload').onclick=()=>refresh();
+</script>
+<script src="/assets/swipe.js"></script>
+<script src="/assets/calendar.js"></script>
+<script src="/assets/recommendations.js"></script>
+<script src="/assets/briefing.js"></script>
+<script>
+refresh();setInterval(()=>{if(!document.hidden)refresh();},8000);
+</script>
+</html>

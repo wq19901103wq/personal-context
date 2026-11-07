@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>待办详情 · 个人助理</title>
+<style>
+:root{font:16px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#23372d;background:#f4f5ef;--green:#35664b;--muted:#738176;--line:#dfe6dc}*{box-sizing:border-box}body{margin:0}main{max-width:760px;margin:auto;padding:26px 20px 64px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;color:var(--green);font-size:14px}h1{font-size:29px;line-height:1.35;font-weight:600;margin:12px 0 16px;overflow-wrap:anywhere}h2{font-size:18px;margin:0 0 14px}p{margin:6px 0}.muted{color:var(--muted);font-size:13px}.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:23px;margin:18px 0}.status{display:inline-block;color:var(--green);background:#edf4e9;border-radius:6px;padding:3px 10px;font-size:12px}.notes,.quote{white-space:pre-wrap;overflow-wrap:anywhere}.notes{margin-top:16px}.times{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}.times b{display:block;font-size:15px;font-weight:500}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}button,input,textarea,select{font:inherit;color:inherit}button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 15px;cursor:pointer}button.primary{color:#fff;background:var(--green);border-color:var(--green)}button.quiet{background:transparent;font-size:13px;color:var(--muted)}button:disabled{opacity:.5;cursor:default}label{display:block;font-size:14px;margin:15px 0 5px}input,textarea,select{display:block;width:100%;min-width:0;border:1px solid #d4dfd1;border-radius:8px;padding:11px;background:white}input:focus,textarea:focus,select:focus{outline:2px solid #bed6b7}textarea{resize:vertical}.fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}summary{cursor:pointer;color:var(--green);font-size:14px}details>summary{padding:4px 0}.entry{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}.entry:first-of-type{border:0;padding-top:0}.evidence{border-left:2px solid #ccdcca;padding-left:12px;margin:16px 0;font-size:14px}.reference{font-size:11px;color:var(--muted);overflow-wrap:anywhere}#feedback{position:sticky;bottom:16px;background:#233d2e;color:white;border-radius:12px;padding:12px 16px;white-space:pre-wrap}#error{color:#a44835;white-space:pre-wrap}footer{font-size:12px;color:var(--muted);margin-top:24px}[hidden]{display:none!important}@media(max-width:480px){main{padding:20px 14px 45px}.card{padding:20px 17px}.fields{grid-template-columns:1fr}h1{font-size:25px}.times{gap:8px}.actions button{flex-grow:1}input,textarea{font-size:16px}}
+</style>
+<main>
+<header><span>↗ 个人助理 / 待办详情</span><button id="refresh" class="quiet">刷新</button></header>
+<p id="error" role="alert"></p>
+<p id="loading" class="muted">正在读取待办…</p>
+<div id="content" hidden>
+  <section class="card">
+    <span id="status" class="status"></span><h1 id="title"></h1>
+    <div class="times"><div><span class="muted">截止时间</span><b id="due"></b></div><div><span class="muted">下次跟进</span><b id="wake"></b></div></div>
+    <p id="chat" class="muted"></p><p id="notes" class="notes"></p>
+    <div class="actions" id="actions"></div>
+  </section>
+  <section class="card" id="origin-card" hidden><h2>从聊天发现的待办</h2><p id="origin-reason" class="muted"></p><div id="origin-records"></div></section>
+  <section class="card" id="execution-card">
+    <h2>让助理分步推进</h2>
+    <p class="muted">读取关联资料，整理信息、制定方案或起草内容。计划、进展和结果会保存在这里。</p>
+    <form id="execution-form">
+      <label for="instruction">希望助理做什么，或补充上次的问题</label>
+      <textarea id="instruction" rows="3" required placeholder="例如：整理这段沟通的已定事项、未解决问题，再给出下一步计划和回复草稿。"></textarea>
+      <div class="actions"><button class="primary" id="run-execution" type="submit">开始推进</button><button id="stop-execution" type="button" hidden>停止推进</button></div>
+      <p class="muted" id="execution-hint"></p>
+    </form>
+    <div id="executions" aria-live="polite"></div>
+  </section>
+  <section class="card"><details id="editor"><summary>编辑待办与跟进安排</summary>
+    <form id="edit-form">
+      <label for="description">待办内容</label><input id="description" required>
+      <label for="note-input">说明与当前进展</label><textarea id="note-input" rows="4"></textarea>
+      <div class="fields"><div><label for="due-input">截止时间</label><input id="due-input" type="datetime-local"></div><div><label for="wake-input">下次跟进</label><input id="wake-input" type="datetime-local"></div></div>
+      <label for="every">跟进间隔</label><select id="every"><option value="3600">每小时</option><option value="14400">每 4 小时</option><option value="86400">每天</option><option value="604800">每周</option></select>
+      <p id="timezone" class="muted"></p>
+      <div class="actions"><button class="primary" type="submit">保存修改</button></div>
+    </form>
+  </details></section>
+  <section class="card"><h2>跟进记录与来源</h2><p class="muted">跟进时保存的聊天与知识快照，按最新时间排列。</p><div id="history"></div></section>
+  <footer>这个链接可查看和修改当前待办，请只在自己的设备上打开。电脑与助理服务运行时可用。</footer>
+</div>
+<p id="feedback" role="status" hidden></p>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), endpoint=location.pathname.replace(/\/$/,'')+'/data';
+let task, busy=false, timer, executions=[], executionSnapshot='';
+function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
+function stamp(value){if(value==null)return '未指定';return new Intl.DateTimeFormat('zh-CN',{timeZone:task.timezone,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000));}
+function local(value){return value==null?'':new Intl.DateTimeFormat('sv-SE',{timeZone:task.timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000)).replace(' ','T');}
+function feedback(text){$('feedback').textContent=text;$('feedback').hidden=false;clearTimeout(timer);timer=setTimeout(()=>$('feedback').hidden=true,4500);}
+function button(text,action,primary=false){const b=el('button',text,primary?'primary':'');b.type='button';b.onclick=action;return b;}
+function evidence(parent,title,text,ref){const n=el('div',undefined,'evidence');n.append(el('div',title,'muted'),el('div',typeof text==='string'?text:JSON.stringify(text),'quote'));if(ref)n.append(el('div',ref,'reference'));parent.append(n);}
+function syncExecutionControls(){const active=executions.find(r=>['queued','running'].includes(r.status)),closed=task&&['done','cancelled'].includes(task.status);$('run-execution').disabled=busy||!!active||closed;$('stop-execution').hidden=!active;$('stop-execution').disabled=busy||!!active?.stop_requested;$('run-execution').textContent=executions.length?'补充要求，继续推进':'开始推进';$('execution-hint').textContent=closed?'待办已结束，重新打开后可继续。':active?(active.stop_requested?'正在停止，已有进展会保留。':active.status==='queued'?'已排队，后台会开始执行。':'助理正在推进，可以离开页面，完成或需要补充时会提醒你。'):'执行完成后可继续补充要求；待办是否完成由你决定。';}
+function renderExecutions(items){executions=items;syncExecutionControls();const snapshot=JSON.stringify(items);if(snapshot===executionSnapshot)return;executionSnapshot=snapshot;const box=$('executions'),opened=new Set([...box.querySelectorAll('details[open]')].map(d=>d.dataset.key));box.replaceChildren();for(const run of items){const entry=el('article',undefined,'entry'),labels={queued:'排队中',running:'正在推进',completed:'本轮已完成',needs_input:'需要你补充',failed:'执行未完成',interrupted:'已停止'};entry.append(el('p',(labels[run.status]||run.status)+' · '+stamp(run.created_at),'status'),el('p',run.instruction,'quote'));if(run.plan.length){const list=el('ol');for(const step of run.plan){const prefix={pending:'○ ',inProgress:'◉ ',completed:'✓ '}[step.status]||'○ ';list.append(el('li',prefix+step.step,'quote'));}entry.append(list);}const latest=run.events.filter(e=>e.kind==='progress').at(-1);if(run.status==='running'&&latest)entry.append(el('p',latest.text,'quote'));if(run.result){entry.append(el('h3','本轮结果'),el('div',run.result,'quote'));}if(run.question){entry.append(el('h3','需要你补充'),el('p',run.question,'quote'));}if(run.error)entry.append(el('p',run.error,'quote'));if(run.events.length){const details=el('details');details.dataset.key=String(run.id);details.open=opened.has(details.dataset.key);details.append(el('summary','查看执行进展 · '+run.events.length+' 条'));for(const event of run.events){const row=el('div',undefined,'entry');row.append(el('p',stamp(event.created_at),'muted'),el('p',event.text,'quote'));details.append(row);}entry.append(details);}box.append(entry);}}
+function render(data){task=data.task;const closed=['done','cancelled'].includes(task.status);$('content').hidden=false;$('loading').hidden=true;$('title').textContent=task.description;document.title=task.description+' · 个人助理';$('status').textContent=({open:'进行中',waiting:'等待回复',done:'已完成',cancelled:'已取消'})[task.status]+' · #'+task.id;$('due').textContent=stamp(task.due_at);$('wake').textContent=closed?'已停止':stamp(task.wake_at);$('notes').textContent=task.notes||'暂时没有补充说明。';$('chat').textContent=task.chat_name?'关联微信：'+task.chat_name:'';
+  $('origin-card').hidden=!task.origin;$('origin-reason').textContent=task.origin?.reason||'';$('origin-records').replaceChildren();for(const r of task.origin?.records||[])evidence($('origin-records'),r.sender+' · 记录时间 '+stamp(r.recorded_at),r.text,r.reference);
+  renderExecutions(data.executions||[]);
+  const actions=$('actions');actions.replaceChildren();if(closed)actions.append(button('重新开始跟进',()=>change({status:'open',wake_at:'now'},'已重新开始跟进'),true));else actions.append(button('完成待办',()=>change({status:'done'},'已完成，停止跟进'),true),button('1 小时后跟进',()=>change({wake_at:'1h'},'下次定时跟进已延后 1 小时')),button(task.status==='waiting'?'继续推进':'等待回复',()=>change({status:task.status==='waiting'?'open':'waiting'},'已更新待办状态')),button('取消待办',()=>change({status:'cancelled'},'已取消，停止跟进')));
+  $('description').value=task.description;$('note-input').value=task.notes;$('due-input').value=local(task.due_at);$('wake-input').value=local(task.wake_at);$('every').value=String(task.followup_seconds);if(!$('every').value)$('every').append(new Option(task.followup_seconds/3600+' 小时',String(task.followup_seconds),true,true));$('timezone').textContent='时间按 '+task.timezone+' 保存。延后只改变定时提醒，关联会话新消息仍会提醒。';
+  const history=$('history');history.replaceChildren();if(!data.history.length)history.append(el('p','尚无跟进记录。','muted'));for(const item of data.history){const entry=el('article',undefined,'entry');entry.append(el('p',stamp(item.created_at),'muted'),el('p',item.body,'quote'));const d=el('details');d.append(el('summary','查看这次跟进的聊天与知识'));if(!item.messages.length&&!item.facts.length&&!item.documents.length)d.append(el('p','这次跟进没有附带聊天或知识来源。','muted'));for(const m of item.messages)evidence(d,m.sender+' · 记录时间 '+stamp(m.recorded_at),m.text,m.reference);for(const f of item.facts)evidence(d,({manual_correction:'人工纠正',manual_fact:'人工补充'})[f.authority]||'已有知识',f.text,f.reference);for(const doc of item.documents)evidence(d,doc.title,doc.text);if(item.sources_unavailable)d.append(el('p','本次跟进时部分来源暂时不可读。','muted'));entry.append(d);history.append(entry);}}
+async function request(data){const r=await fetch(endpoint,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error||'操作失败');return result;}
+function lock(value){busy=value;for(const b of document.querySelectorAll('button'))b.disabled=value;syncExecutionControls();}
+async function load(){if(busy)return;lock(true);$('error').textContent='';try{render(await request());}catch(e){$('loading').hidden=true;$('error').textContent=e.message||'连接失败，请稍后刷新。';}finally{lock(false);}}
+async function change(data,message){if(busy)return;lock(true);$('error').textContent='';try{render(await request(data));feedback(message);}catch(e){$('error').textContent=e.message||'保存失败，请稍后重试。';}finally{lock(false);}}
+$('edit-form').onsubmit=async e=>{e.preventDefault();await change({description:$('description').value,notes:$('note-input').value,due_at:$('due-input').value,wake_at:$('wake-input').value,followup_seconds:Number($('every').value)},'修改已保存');};
+$('execution-form').onsubmit=async e=>{e.preventDefault();if(busy)return;lock(true);$('error').textContent='';try{render(await request({execution_action:'start',instruction:$('instruction').value}));$('instruction').value='';feedback('需求已保存，助理会在后台推进');}catch(error){$('error').textContent=error.message;}finally{lock(false);}};
+$('stop-execution').onclick=()=>change({execution_action:'stop'},'已请求停止，保留已有进展');
+setInterval(async()=>{if(busy||document.hidden||!task)return;try{const data=await request();if(data.task.updated_at!==task.updated_at&&!$('editor').contains(document.activeElement))render(data);else renderExecutions(data.executions||[]);}catch(error){$('error').textContent='进展更新暂时断开，请稍后刷新。';}},3000);
+$('refresh').onclick=load;load();
+</script>
+</html>

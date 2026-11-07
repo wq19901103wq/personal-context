@@ -1,0 +1,48 @@
+  <section class="panel calendar-panel" aria-label="日程表">
+    <div class="panel-head calendar-head"><div><h2>日程表 <span id="calendar-zone" class="count"></span></h2><p id="week-label" class="muted"></p></div><div class="calendar-nav"><button id="week-prev" class="small" aria-label="上一周">←</button><button id="week-today" class="small">今天</button><button id="week-next" class="small" aria-label="下一周">→</button><button id="new-event" class="small primary">＋ 日程</button></div></div>
+    <div class="calendar-legend"><span>● 日程</span><span class="deadline-legend">● 待办截止</span><span id="week-count" class="muted"></span><span class="swipe-hint">右滑删除 · 重复日程整组操作</span></div>
+    <div id="day-picker" class="day-picker" aria-label="选择日期"></div>
+    <div id="calendar-days" class="calendar-days"></div>
+    <details class="unscheduled" open><summary>待安排 <span id="unscheduled-count" class="count"></span></summary><p class="muted">尚未确定日期的日程和未设期限的待办，先放在这里。</p><div id="unscheduled-items"></div></details>
+    <details class="cancelled-events" id="cancelled-events"><summary>已取消日程 <span id="cancelled-count" class="count"></span></summary><div id="cancelled-items"></div></details>
+  </section>
+<dialog id="item-actions" class="action-sheet" aria-labelledby="action-title">
+  <div class="sheet-handle" aria-hidden="true"></div>
+  <div class="sheet-top"><span id="action-kind" class="eyebrow"></span><button id="action-close" class="icon-button" aria-label="关闭操作面板" autofocus>×</button></div>
+  <h2 id="action-title"></h2><p id="action-meta" class="muted"></p>
+  <button id="action-primary" class="primary sheet-primary"></button>
+  <section class="schedule-section"><h3 id="action-date-label"></h3><div id="action-dates" class="date-choices"></div>
+    <div class="schedule-tools"><button id="action-pick-date" class="small">其他日期</button><button id="action-time-toggle" class="small">调整时间</button><button id="action-clear-date" class="small quiet">移回待安排</button></div>
+    <p id="action-date-note" class="muted microcopy"></p>
+    <div id="action-picker" hidden><div class="month-nav"><button id="action-month-prev" class="icon-button" aria-label="上个月">‹</button><b id="action-month-label"></b><button id="action-month-next" class="icon-button" aria-label="下个月">›</button></div><div class="month-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div id="action-month-days" class="month-days" aria-label="选择日期"></div></div>
+    <div id="action-times" hidden><h3 id="action-time-label"></h3><div id="action-time-choices" class="time-choices"></div><div class="time-choices"><button id="action-all-day" data-action-time="all-day">全天</button><button id="action-custom-toggle">其他时间</button></div><div id="action-custom-time" hidden><div class="time-selects"><select id="action-hour" aria-label="小时"></select><span>:</span><select id="action-minute" aria-label="分钟"></select><button id="action-custom-save" class="primary">确定</button></div></div></div>
+  </section>
+  <div id="action-followup" class="sheet-secondary"><button id="action-wait">等待回复</button><button id="action-later">1 小时后跟进</button></div>
+  <p id="action-notes" class="notes"></p><div id="action-evidence"></div><a id="action-detail" class="task-link" href="#">来源、计划与结果 →</a>
+  <div class="sheet-footer"><button id="action-edit" class="quiet">编辑文字与更多</button><button id="action-cancel" class="quiet">取消事项</button><button id="action-delete" class="danger quiet">删除</button></div>
+  <p id="action-error" class="error" role="alert"></p>
+</dialog>
+<dialog id="event-dialog"><form id="event-form"><h2 id="event-dialog-title">新建日程</h2>
+  <input id="event-date" type="hidden"><input id="event-period" type="hidden">
+  <label for="event-title">日程标题</label><input id="event-title" required placeholder="例如：和小王讨论项目方案" autocomplete="off">
+  <div id="event-quick-schedule" class="editor-quick-schedule"></div>
+  <label for="event-repeat">重复</label><select id="event-repeat"><option value="">不重复</option><option value="daily">每天</option><option value="weekly">每周</option></select>
+  <div id="event-repeat-weekly" hidden><div id="event-weekdays" class="time-choices" aria-label="重复星期"></div><label for="event-weekly-count">每周天数</label><select id="event-weekly-count"><option value="">按已选星期</option><option value="1">1 天</option><option value="2">2 天</option><option value="3">3 天</option><option value="4">4 天</option><option value="5">5 天</option><option value="6">6 天</option><option value="7">7 天</option></select><p id="event-repeat-note" class="muted"></p></div>
+  <p id="event-series-note" class="muted" hidden>编辑、取消和右滑删除均应用于整组重复日程。</p>
+  <details id="event-more" class="advanced"><summary>地点、说明与更多设置</summary>
+  <p id="event-zone" class="muted"></p>
+  <label class="inline-check"><input id="event-all-day" type="checkbox">全天</label>
+  <div class="form-row"><div><label for="event-start">开始（可选）</label><input id="event-start" type="datetime-local"></div><div><label for="event-end">结束（可选）</label><input id="event-end" type="datetime-local"></div></div>
+  <p class="muted">日期不明确时留空，保存到待安排。全天日程的结束日期包含当天。</p>
+  <label for="event-repeat-until">重复结束日期（可选，留空则持续）</label><input id="event-repeat-until" type="date">
+  <label for="event-location">地点</label><input id="event-location" placeholder="地址或线上会议位置">
+  <label for="event-notes">说明与进展</label><textarea id="event-notes" rows="3"></textarea>
+  <label for="event-time-text">原话时间（可选）</label><input id="event-time-text" placeholder="例如：下周找一天，具体时间再定">
+  <label for="event-status">状态</label><select id="event-status"><option value="confirmed">已确认</option><option value="tentative">待确认</option><option value="cancelled">已取消</option></select>
+  <label class="inline-check"><input id="event-remind-enabled" type="checkbox" checked>微信提醒</label>
+  <label for="event-remind-minutes">开始前多少分钟</label><input id="event-remind-minutes" type="number" min="1" step="1" value="30" inputmode="numeric">
+  <p class="muted">仅提醒已确认且时间明确的日程。全天日程按当天 00:00 计算；电脑休眠期间无法推送。</p>
+  <p id="event-reminder-state" class="muted" role="status"></p>
+  <div id="event-evidence"></div></details><p id="event-error" class="error" role="alert"></p>
+  <div class="dialog-actions"><button id="event-cancel" type="button" class="quiet">取消日程</button><button type="button" data-close="event-dialog">关闭</button><button type="submit" class="primary">保存日程</button></div>
+</form></dialog>

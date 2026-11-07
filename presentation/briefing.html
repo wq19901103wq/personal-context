@@ -1,0 +1,12 @@
+<section class="panel briefing" aria-labelledby="briefing-heading">
+  <div class="panel-head"><div><h2 id="briefing-heading">今日简报</h2><p class="muted" id="briefing-updated"></p></div></div>
+  <div class="briefing-content">
+    <div id="briefing-today"></div>
+    <div id="briefing-changes" aria-live="polite"></div>
+    <details id="briefing-options"><summary>推送设置与最近记录</summary>
+      <p class="muted">每日一份；10:00–21:00 内避开已有日程及前后 30 分钟。变化连续 2 分钟稳定后合并发送，两次简报或变化推送至少间隔 30 分钟。当天没有可发送空档就保留在这里。</p>
+      <div class="actions"><button id="daily-toggle" class="small quiet" type="button"></button><button id="changes-toggle" class="small quiet" type="button"></button></div>
+      <p id="briefing-channel" class="muted"></p><div id="briefing-history"></div>
+    </details>
+  </div>
+</section>

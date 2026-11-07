@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>个人助理 · 日程与待办</title>
+<link rel="stylesheet" href="/assets/base.css">
+<style>
+.discovery{margin:0 0 24px}.discovery .panel-head{border:0}.discovery-list{padding:0 22px 16px}.scan{padding:9px 0;border-top:1px solid var(--border);font-size:13px}.secondary{margin-top:24px}.choice{display:flex;align-items:center;gap:9px;margin:0;padding:10px;border-bottom:1px solid var(--border);cursor:pointer}.choice input,.inline-check input{width:auto;flex-shrink:0}.inline-check{display:flex;align-items:center;gap:8px}#extract-chats{max-height:260px;overflow:auto;margin-top:12px;border:1px solid var(--border);border-radius:8px}.profile-label{display:flex;justify-content:space-between;gap:12px}.profile-label .pill{flex-shrink:0}#watch-status{margin-top:8px}.insight-body{white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
+<link rel="stylesheet" href="/assets/calendar.css">
+<link rel="stylesheet" href="/assets/recommendations.css">
+<link rel="stylesheet" href="/assets/briefing.css">
+<header><div class="brand"><span class="mark">↗</span>个人助理</div><div class="actions"><a id="mobile-calendar" hidden>手机日程 ↗</a><button id="sources-open" class="quiet">知识与微信来源</button></div></header>
+<main>
+  <div class="topline"><div><h1>把事情安排好。</h1><p class="muted status-line" id="status" role="status">正在连接助理…</p></div><div class="top-buttons"><button id="check-now">检查待办</button><button id="new-task">＋ 新建待办</button><button class="primary" id="extract-open">从微信发现</button></div></div>
+  <div id="worker-error" class="error" role="alert"></div>
+<!-- briefing -->
+<!-- calendar -->
+  <section class="panel discovery"><div class="panel-head"><div><h2>从聊天到行动</h2><p class="muted">读取已保存的聊天，整理待办、日程、兴趣与地点偏好，发现相关的新信息。</p><p id="watch-status" class="muted"></p><p id="watch-error" class="error" role="alert"></p></div><div class="actions"><button id="start-watch" class="small">自动关注新聊天</button><button id="stop-watch" class="small" hidden>停止自动发现</button></div></div><div id="scans" class="discovery-list"></div></section>
+  <div class="columns">
+    <section class="panel"><div class="panel-head"><h2>待办<span id="task-count" class="count"></span></h2><div class="tabs"><button data-filter="active" class="selected">进行中</button><button data-filter="closed">已结束</button></div></div><div id="tasks"></div></section>
+    <section class="panel"><div class="panel-head"><h2>跟进收件箱<span id="inbox-count" class="count"></span></h2><span class="muted">到点提醒 · 新消息</span></div><div id="inbox"></div></section>
+  </div>
+  <div class="columns secondary">
+    <!-- recommendations -->
+    <section class="panel"><div class="panel-head"><h2>人物画像<span id="profile-count" class="count"></span></h2><span class="muted">兴趣 · 地点 · 偏好</span></div><div id="profiles"></div></section>
+  </div>
+  <section class="panel secondary"><div class="panel-head"><div><h2>设备输入</h2><p class="muted">接收音箱或语音设备的最终转写，自动整理到同一个待办和日程表。</p></div><button id="device-open" class="small">＋ 添加设备</button></div><div id="devices"></div></section>
+  <p class="footer">完成待办后助理会停止跟进。关闭页面后，跟进进程仍会继续；电脑休眠期间暂停，恢复后补上到期提醒。</p>
+</main>
+<dialog id="task-dialog"><form id="task-form"><h2 id="task-dialog-title">新建待办</h2>
+  <label for="description">要推进什么</label><input id="description" name="description" required placeholder="例如：把修改后的方案发给对方" autocomplete="off">
+  <div id="task-quick-schedule" class="editor-quick-schedule"></div>
+  <details id="task-more" class="advanced"><summary>说明、提醒与更多设置</summary>
+  <label for="notes">补充说明</label><textarea id="notes" name="notes" rows="2" placeholder="目前进展、需要注意的事"></textarea>
+  <div class="form-row"><div><label for="due">截止时间（可选）</label><input type="datetime-local" id="due" name="due_at"></div><div><label for="wake">下次跟进（可选）</label><input type="datetime-local" id="wake" name="wake_at"></div></div>
+  <p class="muted" style="margin-top:7px">未指定跟进时间时，在截止时提醒；两者都没填则立即跟进。</p>
+  <label for="every">未结束时，每隔多久再跟进</label><select id="every"><option value="3600">1 小时</option><option value="14400">4 小时</option><option value="86400" selected>1 天</option><option value="604800">1 周</option></select>
+  <div id="create-scope"><label style="display:flex;gap:8px;align-items:center"><input id="execute" type="checkbox" style="width:auto">保存后让助理分步推进</label><details class="advanced"><summary>关联微信与已有知识</summary>
+    <label for="chat-search">查找微信会话</label><div class="search-row"><input id="chat-search" placeholder="会话名称，可留空"><button type="button" id="find-chats">查找</button></div>
+    <label for="chat">关联会话（可选）</label><select id="chat"><option value="">不关联</option></select><p class="muted">这个会话收到新消息时也会提醒；下次跟进时间只影响定时提醒。</p>
+    <label for="knowledge-query">知识关键词（可选）</label><input id="knowledge-query" placeholder="人物、项目或主题"><p class="muted">跟进时查找 DH 与 RPA 中的相关知识，并保留来源。</p>
+    <label for="person-account">对方的明确账号（可选）</label><input id="person-account" placeholder="用于按已确认身份查找人物事实">
+  </details></div><p id="bound-source" class="muted source-summary" hidden></p>
+  </details>
+  <p id="task-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="task-dialog">取消</button><button type="submit" class="primary">保存待办</button></div>
+</form></dialog>
+
+<dialog id="sources-dialog"><form id="sources-form"><h2>知识与微信来源</h2><p class="muted">新待办会记住创建时的来源。更改配置不会把已有待办关联到其他账号或会话。</p>
+  <label for="history-db">微信记录数据库</label><input id="history-db" required>
+  <label for="history-account">这份微信记录所属账号</label><input id="history-account" required>
+  <label for="dh-paths">DH 知识文件 / Share 目录（每行一个）</label><textarea id="dh-paths" rows="2"></textarea>
+  <label for="rpa-paths">RPA 记忆目录（每行一个）</label><textarea id="rpa-paths" rows="2"></textarea>
+  <label for="timezone">时间所在时区</label><input id="timezone" required placeholder="Asia/Shanghai">
+  <p id="sources-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="sources-dialog">取消</button><button type="submit" class="primary">保存来源</button></div>
+</form></dialog>
+<dialog id="extract-dialog"><form id="extract-form"><h2>从微信发现</h2><p class="muted">选择要关注的会话，助理会从已保存的聊天中整理待办、日程、人物画像和相关机会。每个会话读取所选时间内最新 120 条。</p>
+  <label for="extract-search">查找会话</label><div class="search-row"><input id="extract-search" placeholder="会话名称，可留空"><button type="button" id="extract-find">查找</button></div>
+  <div id="extract-chats"></div><p id="extract-selection" class="muted"></p>
+  <label for="extract-hours">读取范围</label><select id="extract-hours"><option value="24">最近 1 天</option><option value="168" selected>最近 7 天</option><option value="720">最近 30 天</option></select>
+  <label class="inline-check"><input id="extract-watch" type="checkbox">每小时继续关注这些会话</label><p class="muted">没有新内容时不调用模型。新发现会保存在下方；相关建议也可推送到微信。</p>
+  <p id="extract-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="extract-dialog">取消</button><button class="primary" type="submit">开始发现</button></div>
+</form></dialog>
+<div id="toast" hidden role="status"></div>
+<dialog id="device-dialog"><form id="device-form"><h2>添加语音设备</h2>
+  <p class="muted">先生成接入地址，再由设备或转写服务提交文字。音箱需要有开放接口或通过桥接接入。</p>
+  <label for="device-name">设备名称</label><input id="device-name" required maxlength="200" placeholder="例如：书房音箱">
+  <details class="advanced"><summary>说话者身份（可选）</summary><label for="device-speaker">可靠识别为本人的说话者 ID</label><input id="device-speaker" maxlength="200" placeholder="仅在上游能识别本人时填写"><p class="muted">默认身份未确认。设备属于你，不代表收到的话都是你说的。</p></details>
+  <p id="device-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="device-dialog">取消</button><button type="submit" class="primary">生成接入信息</button></div>
+</form></dialog>
+<dialog id="device-pairing"><h2>设备接入信息</h2><p class="muted">凭据只在这次显示，请保存到设备或转写服务中。只提交最终转写；重试保留相同的 event_id。</p>
+  <label for="device-config">地址、凭据与请求示例</label><textarea id="device-config" rows="15" readonly spellcheck="false"></textarea>
+  <div class="dialog-actions"><button type="button" id="device-copy">复制</button><button type="button" data-close="device-pairing" class="primary">已保存</button></div>
+</dialog>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let state={tasks:[],events:[],inbox:[],sources:{},profiles:[],insights:[],scans:[]}, filter='active', editing=null, toastTimer;
+const selectedChats=new Map();
+function element(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
+function toast(text){showToast(text);}
+async function api(path,data){const options=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)};const res=await fetch(path,options);const value=await res.json();if(!res.ok)throw Error(value.error||'操作失败');return value;}
+function stamp(value,tz){return value==null?'未指定':new Intl.DateTimeFormat('zh-CN',{timeZone:tz||state.sources.timezone||'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000));}
+function localValue(value,tz){if(value==null)return '';const p=new Intl.DateTimeFormat('sv-SE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000));return p.replace(' ','T');}
+function empty(target,title,detail){const box=element('div',undefined,'empty');box.append(element('b',title),element('p',detail));target.append(box);}
+function button(text,action,cls='small'){const b=element('button',text,cls);b.type='button';b.onclick=async()=>{b.disabled=true;try{await action();}catch(error){toast(error.message);}finally{b.disabled=false;}};return b;}
+async function change(id,data,message){await api('/api/tasks/'+id,data);toast(message);await refresh();}
+function renderTasks(){
+  const box=$('tasks');box.replaceChildren();
+  const active=state.tasks.filter(t=>!['done','cancelled'].includes(t.status));
+  $('task-count').textContent=active.length+' 项';
+  const items=state.tasks.filter(t=>filter==='active'?!['done','cancelled'].includes(t.status):['done','cancelled'].includes(t.status));
+  if(!items.length){empty(box,filter==='active'?'从聊天里发现要推进的事。':'还没有结束的待办。',filter==='active'?'助理会自动整理新聊天，也可以手动添加。':'完成或取消的待办会保留在这里。');return;}
+  for(const task of items){
+    const card=element('article',undefined,'task '+task.status),row=element('div',undefined,'row');
+    const closed=['done','cancelled'].includes(task.status);
+    const check=button(closed?'✓':'',async()=>{
+      await api('/api/tasks/'+task.id,{status:closed?'open':'done'});await refresh();
+      showToast(closed?'待办已重新打开':'待办已完成',async()=>{await api('/api/tasks/'+task.id,{status:task.status,wake_at:task.wake_at});await refresh();});
+    },'check');check.setAttribute('aria-label',closed?'重新开始跟进':'完成待办');row.append(check);
+    const body=element('div',undefined,'task-body');
+    body.append(button(task.description,()=>openTask(task),'task-title-button'));
+    const meta=element('div',undefined,'muted task-meta');
+    if(task.status==='waiting')meta.append(element('span','等待回复','pill'));
+    if(closed)meta.append(element('span',task.status==='done'?'已完成':'已取消','pill'));
+    if(task.scope.chat_id)meta.append(element('span',task.scope.chat_name||'来自微信','task-source'));
+    body.append(meta);
+    if(task.notes)body.append(element('p',task.notes,'notes task-preview'));
+    const actions=element('div',undefined,'actions compact-actions');
+    actions.append(button(task.due_at==null?'安排日期':stamp(task.due_at,task.timezone),()=>openTask(task),'date-chip'+(task.due_at!=null&&task.due_at<Date.now()/1000&&!closed?' overdue':'')),button('•••',()=>openTask(task),'more-button'));
+    actions.lastChild.setAttribute('aria-label','更多待办操作');body.append(actions);row.append(body);card.append(row);box.append(swipeItem(card,task,'task'));
+  }
+}
+function refText(ref){return [ref.source?.source_id,ref.source?.account_id,ref.document_id||ref.chat_id,ref.record_id||('#'+ref.message_id)].filter(Boolean).join(' · ');}
+function renderEvidence(context,reminderId){const outer=element('details');outer.dataset.key='reminder-'+reminderId;outer.append(element('summary','查看聊天原文与知识来源'));if(!(context.messages||[]).length)outer.append(element('p','本次没有可展示的聊天记录。','muted'));const incoming=new Set((context.incoming_refs||[]).map(r=>r.message_id));for(const msg of context.messages||[]){const quote=element('div',undefined,'evidence');quote.append(element('div',(msg.sender.display_name||msg.sender.source_sender_id||'未知发送者')+' · 记录时间 '+stamp(msg.time.recorded_at,context.timezone)+(incoming.has(msg.ref.message_id)?' · 新消息':''),'muted'));quote.append(element('div',msg.content||msg.image_description||'（无文字内容）','quote'),element('div',refText(msg.ref),'ref'));outer.append(quote);}
+  const knowledge=context.knowledge||{};if((knowledge.people||[]).length)outer.append(element('p','相关人物：'+knowledge.people.map(p=>p.name).join('、'),'muted'));for(const fact of knowledge.facts||[]){const ev=element('div',undefined,'evidence');ev.append(element('div',fact.authority==='manual_correction'?'人工纠正':fact.authority==='manual_fact'?'人工补充':'已有事实','muted'));const fields=fact.fields;let text=fields.text||fields.summary||fields.description||fields.value||fields.predicate||fields.label||'查看事实详情';ev.append(element('div',typeof text==='string'?text:JSON.stringify(text),'quote'));const detail=element('details');detail.append(element('summary','完整事实与证据'),element('pre',JSON.stringify({内容:fields,证据:fact.evidence},null,2)));ev.append(detail,element('div',refText(fact.ref),'ref'));outer.append(ev);}for(const doc of knowledge.documents||[]){const ev=element('div',undefined,'evidence');ev.append(element('div',doc.title,'task-title'));const d=element('details');d.append(element('summary','阅读相关知识'),element('div',doc.text,'quote'));ev.append(d,element('div',refText(doc.ref),'ref'));outer.append(ev);}for(const error of context.source_errors||[])outer.append(element('div',error.source+'：'+error.error,'error'));return outer;}
+function renderWechat(card,item){
+  if(!item.wechat_status)return;
+  const labels={pending:'等待推送',sending:'正在推送',delivered:'微信接口已接受',retry:'等待重试',failed:'推送失败',unknown:'结果未知，请查看微信；不会自动重发',superseded:'已停止推送'};
+  const problem=['retry','failed','unknown'].includes(item.wechat_status);
+  card.append(element('p','微信 · '+(labels[item.wechat_status]||item.wechat_status),problem?'error':'muted'));
+  if(item.wechat_error)card.append(element('p',item.wechat_error,'error'));
+  if(!item.read_at&&['open','waiting'].includes(item.task_status)&&['failed','retry'].includes(item.wechat_status))card.append(button('重试微信推送',async()=>{await api('/api/reminders/'+item.id+'/retry-wechat',{});toast('已安排重试');await refresh();},'small'));
+}
+function renderInbox(){const box=$('inbox');const opened=new Set([...box.querySelectorAll('details[open][data-key]')].map(d=>d.dataset.key));box.replaceChildren();$('inbox-count').textContent=state.inbox.filter(r=>!r.read_at).length+' 条未读';if(!state.inbox.length){empty(box,'到点了，我会在这里提醒你。','跟进记录会附上相关聊天与已有知识。');return;}for(const item of state.inbox){const card=element('article',undefined,'reminder'+(item.read_at?'':' unread'));const labels={deadline:'期限已到',scheduled:'定时跟进',new_message:'微信新消息'};card.append(element('div',item.trigger.split('+').map(k=>labels[k]||k).join(' · ')+' · '+stamp(item.created_at),'muted meta'),element('h3',item.title),element('p',item.body));if(item.task_status==='done'||item.task_status==='cancelled')card.append(element('span',item.task_status==='done'?'待办已完成':'待办已取消','pill'));const evidence=renderEvidence(item.context,item.id);evidence.open=opened.has(evidence.dataset.key);card.append(evidence);renderWechat(card,item);if(item.notification_status==='failed'||item.notification_status==='retry')card.append(element('p','本机通知未送达；这条提醒已保存在收件箱。','error'));if(!item.read_at)card.append(button('标为已读',async()=>{await api('/api/reminders/'+item.id,{});await refresh();},'small quiet'));box.append(card);}}
+function recordEvidence(records,key){const d=element('details');d.dataset.key=key;d.append(element('summary','查看原始记录'));for(const r of records){const q=element('div',undefined,'evidence');q.append(element('div',(r.actor.display_name||'未知发送者')+' · 记录时间 '+stamp(r.time.recorded_at),'muted'),element('div',r.text,'quote'),element('div','会话 '+r.stream_id+' · 消息 #'+r.id,'ref'));d.append(q);}return d;}
+function renderProfiles(){const box=$('profiles'),opened=new Set([...box.querySelectorAll('details[open]')].map(d=>d.dataset.key));box.replaceChildren();$('profile-count').textContent=state.profiles.length+' 条';if(!state.profiles.length){empty(box,'从日常表达里了解你。','明确表达和推断会分别标注，每条画像都保留原文。');return;}for(const p of state.profiles){const card=element('article',undefined,'task'),line=element('div',undefined,'profile-label');line.append(element('span',p.subject_name,'task-title'),element('span',({interest:'兴趣',address:'地点',preference:'偏好'})[p.category]||p.category,'pill'));card.append(line,element('div',p.value,'notes'),element('p',(p.confidence==='explicit'?'原文明确表达':'根据原文推断')+(p.is_self===1?' · 本人':p.is_self===0?' · 联系人':' · 身份未确认'),'muted'));const ev=recordEvidence(p.evidence,'profile-'+p.id);ev.open=opened.has(ev.dataset.key);card.append(ev,button('忽略这条画像',async()=>{await api('/api/profiles/'+p.id+'/dismiss',{});await refresh();},'small quiet'));box.append(card);}}
+function renderScans(){const watch=state.extraction_watch||{};$('watch-status').textContent=watch.enabled?(watch.mode==='all'?'每分钟发现所有微信会话的新活动 · 从 '+stamp(watch.started_at)+' 开始':'每小时关注 '+(watch.scopes||[]).length+' 个会话')+(watch.checked_at?' · 最近检查 '+stamp(watch.checked_at):'')+' · 下次 '+stamp(watch.next_at):'自动发现未开启';$('watch-error').textContent=watch.last_error?'读取新聊天暂时失败，将自动重试：'+watch.last_error:'';$('stop-watch').hidden=!watch.enabled;$('start-watch').hidden=watch.enabled&&watch.mode==='all';const box=$('scans');box.replaceChildren();if(!state.scans.length){box.append(element('p',watch.enabled?'正在关注新聊天，发现会出现在这里。':'点击“自动关注新聊天”，或从已有聊天中选择提取。','muted'));return;}const labels={queued:'排队中',running:'正在提取',completed:'已完成',failed:'提取失败',interrupted:'已中断'};for(const s of state.scans.slice(0,5)){const row=element('div',undefined,'scan'),r=s.result;row.append(element('div',(s.chat_name||'微信会话')+' · '+(labels[s.status]||s.status)+' · '+stamp(s.created_at),'task-title'));if(r.summary)row.append(element('p',r.summary,'muted'));if(r.created_task_ids?.length||r.updated_task_ids?.length||r.created_event_ids?.length||r.updated_event_ids?.length||r.profile_ids?.length||r.created_insight_ids?.length)row.append(element('p','待办 新增 '+(r.created_task_ids?.length||0)+' / 更新 '+(r.updated_task_ids?.length||0)+' · 日程 新增 '+(r.created_event_ids?.length||0)+' / 更新 '+(r.updated_event_ids?.length||0)+' · 画像 '+(r.profile_ids?.length||0)+' · 推荐 '+(r.created_insight_ids?.length||0),'muted'));if(r.skipped_updates)row.append(element('p',r.skipped_updates+' 项保留了较新的修改或已结束状态。','muted'));if(r.window_limited)row.append(element('p',s.source_kind==='device'?'剩余设备记录将继续分批整理。':'本次读取最新 120 条，更早的记录尚未处理。','muted'));if(s.error)row.append(element('p',s.error,'error'));box.append(row);}}
+async function refresh(){try{state=await api('/api/state');$('mobile-calendar').hidden=!state.calendar_url;if(state.calendar_url)$('mobile-calendar').href=state.calendar_url;await renderCalendar();renderTasks();renderInbox();renderScans();renderProfiles();renderInsights();renderBriefings();renderDevices();$('status').replaceChildren(element('span',undefined,'live'),document.createTextNode((state.last_tick?'助理正在跟进 · 最近检查 '+stamp(state.last_tick):'助理正在启动')+(state.wechat?' · 微信提醒已启用':'')+(state.notify?' · 本机通知已启用':'')+(!state.wechat&&!state.notify?' · 提醒保存在收件箱':'')));$('worker-error').textContent=state.last_error?'本轮跟进遇到问题：'+state.last_error:(state.wechat_error||'');}catch(error){$('status').textContent='助理连接已断开，请重新启动本地进程。';}}
+function editTask(task=null){editing=task;$('task-form').reset();$('task-error').textContent='';$('task-dialog-title').textContent=task?'编辑待办':'新建待办';$('create-scope').hidden=!!task;$('bound-source').hidden=!task;$('chat').replaceChildren(new Option('不关联',''));if(task){$('description').value=task.description;$('notes').value=task.notes;$('due').value=localValue(task.due_at,task.timezone);$('wake').value=localValue(task.wake_at,task.timezone);$('every').value=String(task.followup_seconds);if(!$('every').value)$('every').append(new Option(task.followup_seconds/3600+' 小时',String(task.followup_seconds),true,true));$('bound-source').textContent='时间所在时区：'+task.timezone+'；关联会话：'+(task.scope.chat_name||task.scope.chat_id||'无');}$('task-more').open=!!task;editorQuickDates('task',task);$('task-dialog').showModal();}
+$('new-task').onclick=()=>openTask();for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>{filter=b.dataset.filter;for(const tab of document.querySelectorAll('[data-filter]'))tab.classList.toggle('selected',tab===b);renderTasks();};
+$('task-form').onsubmit=async event=>{event.preventDefault();const submit=event.submitter;submit.disabled=true;try{const data={description:$('description').value,notes:$('notes').value,due_at:$('due').value,wake_at:$('wake').value,followup_seconds:Number($('every').value)};let result;if(editing)result=await api('/api/tasks/'+editing.id,data);else{Object.assign(data,{chat_id:$('chat').value,knowledge_query:$('knowledge-query').value,person_account:$('person-account').value,execute:$('execute').checked});result=await api('/api/tasks',data);}$('task-dialog').close();toast(result.source_warnings?.length?'待办已保存，关联来源暂时不可读':'待办已保存');await refresh();}catch(error){$('task-error').textContent=error.message;}finally{submit.disabled=false;}};
+$('find-chats').onclick=async()=>{const b=$('find-chats');b.disabled=true;try{const chats=await api('/api/chats?q='+encodeURIComponent($('chat-search').value));$('chat').replaceChildren(new Option('不关联',''));for(const chat of chats)$('chat').append(new Option(chat.display_name+' · '+chat.chat_id,chat.chat_id));toast(chats.length?'找到 '+chats.length+' 个会话':'没有匹配的会话');}catch(error){$('task-error').textContent=error.message;}finally{b.disabled=false;}};
+$('sources-open').onclick=()=>{const s=state.sources;$('history-db').value=s.history_db||'';$('history-account').value=s.history_account||'';$('dh-paths').value=(s.dh_knowledge||[]).join('\n');$('rpa-paths').value=(s.rpa_memory||[]).join('\n');$('timezone').value=s.timezone||'Asia/Shanghai';$('sources-error').textContent='';$('sources-dialog').showModal();};
+$('sources-form').onsubmit=async event=>{event.preventDefault();event.submitter.disabled=true;try{const lines=id=>$(id).value.split('\n').map(v=>v.trim()).filter(Boolean);await api('/api/sources',{history_db:$('history-db').value,history_account:$('history-account').value,dh_knowledge:lines('dh-paths'),rpa_memory:lines('rpa-paths'),timezone:$('timezone').value});$('sources-dialog').close();toast('来源已保存，对新待办生效');await refresh();}catch(error){$('sources-error').textContent=error.message;}finally{event.submitter.disabled=false;}};
+$('check-now').onclick=async()=>{const b=$('check-now');b.disabled=true;try{const result=await api('/api/tick',{});toast(result.reminders.length?'有 '+result.reminders.length+' 条新提醒':'检查完成，暂时没有新的跟进');await refresh();}catch(error){toast(error.message);}finally{b.disabled=false;}};
+function selectionLabel(){$('extract-selection').textContent='已选 '+selectedChats.size+' 个会话（最多 10 个）'+(selectedChats.size?'：'+[...selectedChats.values()].join('、'):'');}
+async function findExtractChats(){const chats=await api('/api/chats?q='+encodeURIComponent($('extract-search').value));$('extract-chats').replaceChildren();for(const c of chats){const label=element('label',undefined,'choice'),check=element('input');check.type='checkbox';check.value=c.chat_id;check.checked=selectedChats.has(c.chat_id);check.onchange=()=>{if(check.checked)selectedChats.set(c.chat_id,c.display_name);else selectedChats.delete(c.chat_id);selectionLabel();};label.append(check,element('span',c.display_name));$('extract-chats').append(label);}if(!chats.length)$('extract-chats').append(element('p','没有找到会话。','muted'));selectionLabel();}
+$('extract-open').onclick=async()=>{$('extract-error').textContent='';selectedChats.clear();const watch=state.extraction_watch||{};for(const s of watch.scopes||[])selectedChats.set(s.chat_id,s.chat_name);$('extract-watch').checked=!!watch.enabled&&watch.mode!=='all';$('extract-search').value='';$('extract-dialog').showModal();try{await findExtractChats();}catch(error){$('extract-error').textContent=error.message;}};
+$('extract-find').onclick=async()=>{try{await findExtractChats();}catch(error){$('extract-error').textContent=error.message;}};
+$('extract-form').onsubmit=async e=>{e.preventDefault();if(!selectedChats.size){$('extract-error').textContent='请选择要读取的会话。';return;}e.submitter.disabled=true;try{const data={chat_ids:[...selectedChats.keys()],hours:Number($('extract-hours').value)};if($('extract-watch').checked||state.extraction_watch?.mode!=='all')data.watch=$('extract-watch').checked;await api('/api/extract',data);$('extract-dialog').close();toast('已排队，发现会保存在看板中');await refresh();}catch(error){$('extract-error').textContent=error.message;}finally{e.submitter.disabled=false;}};
+$('start-watch').onclick=async()=>{const b=$('start-watch');b.disabled=true;try{await api('/api/extract',{watch_all:true});toast('已开始关注新聊天，旧记录只作上下文');await refresh();}catch(error){toast(error.message);}finally{b.disabled=false;}};
+$('stop-watch').onclick=async()=>{const b=$('stop-watch');b.disabled=true;try{await api('/api/extract/stop-watch',{});toast('已停止自动发现');await refresh();}catch(error){toast(error.message);}finally{b.disabled=false;}};
+</script>
+<script src="/assets/swipe.js"></script>
+<script src="/assets/calendar.js"></script>
+<script src="/assets/recommendations.js"></script>
+<script src="/assets/briefing.js"></script>
+<script src="/assets/devices.js"></script>
+<script>
+refresh();setInterval(()=>{if(!document.hidden)refresh();},8000);
+</script>
+</html>

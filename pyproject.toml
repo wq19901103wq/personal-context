@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-context"
+version = "0.1.0"
+description = "Personal assistant with source inputs, shared memory, web views and push delivery"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["wechat-reader @ git+https://github.com/wq19901103wq/wechat-reader.git@1fe7234493412fa6a0976739eb678169da5b2ab4"]
+
+[project.urls]
+Repository = "https://github.com/wq19901103wq/personal-context"
+
+[project.scripts]
+wechat-history = "personal_context.cli:main"
+personal-assistant = "cli:main"
+
+[tool.setuptools]
+py-modules = ["app", "cli", "followup", "execution", "briefing", "proactive", "integrations", "maps", "places", "wechat_commands", "personal_assistant"]
+
+[tool.setuptools.packages.find]
+namespaces = false
+include = ["common*", "personal_context*", "inputs*", "memory*", "presentation*", "place_providers*"]
+
+[tool.setuptools.package-data]
+"presentation" = ["*.html", "*.js", "*.css"]
