@@ -1,4 +1,4 @@
-"""Persist public progress while MAC owns the native model/tool execution loop."""
+"""Persist public progress while Codex owns the native model/tool execution loop."""
 
 import asyncio
 from dataclasses import asdict
@@ -8,8 +8,8 @@ import logging
 import os
 from pathlib import Path
 import shutil
-import sys
 
+from common.codex_runtime import CodexRuntime, DynamicTool
 from common.history import HistoryCursor, HistoryQuery
 from inputs.wechat import history_reader
 from memory.context import knowledge_context
@@ -36,28 +36,13 @@ PLAN_SCHEMA = dict(type='array', items=dict(type='object', additionalProperties=
         'status': dict(type='string', enum=['pending', 'inProgress', 'completed'])}))
 
 
-def mac_runtime():
-    # MAC is an optional local execution host, not a second copy of its runtime.
-    try:
-        from mac_system.agents.root_runtime import CodexAppServerThread, DynamicTool
-    except ModuleNotFoundError as exc:
-        if not (exc.name or '').startswith('mac_system'):
-            raise
-        root = Path(os.environ.get('MAC_SYSTEM_ROOT', Path.home() / 'multi-agent-coding-system'))
-        sys.path.insert(0, str(root / 'src'))
-        from mac_system.agents.root_runtime import CodexAppServerThread, DynamicTool
-    return CodexAppServerThread, DynamicTool
-
-
 def build_runtime(store, instructions, *, tools=(), event_handler=None, model=None,
                   web_search='disabled', mcp_servers=None):
-    Runtime, _ = mac_runtime()
     work = store.path.parent / 'runtime' / 'workspace'
     work.mkdir(parents=True, exist_ok=True)
-    return Runtime(codex_bin=os.environ.get('CODEX_BIN') or shutil.which('codex') or
+    return CodexRuntime(codex_bin=os.environ.get('CODEX_BIN') or shutil.which('codex') or
                    str(Path.home() / '.local/node/bin/codex'), cwd=work, tools=tools,
                    developer_instructions=instructions, event_handler=event_handler,
-                   sandbox='read-only', approval_policy='never', environments=[],
                    codex_home=work.parent / 'codex-home',
                    thread_config={'model': model or os.environ.get('PERSONAL_ASSISTANT_MODEL', 'gpt-6.1-sol'),
                                   'model_provider': 'assistant_openai_https',
@@ -68,9 +53,7 @@ def build_runtime(store, instructions, *, tools=(), event_handler=None, model=No
                                       'requires_openai_auth': True, 'supports_websockets': False},
                                   'web_search': web_search, 'features.multi_agent': False,
                                   'features.apps': False, 'project_doc_max_bytes': 0,
-                                  'mcp_servers': mcp_servers or {}},
-                   continuation_max_attempts=0, provider_probe_enabled=False,
-                   proxy_recovery_enabled=False)
+                                  'mcp_servers': mcp_servers or {}})
 
 
 async def infer_json(runtime_factory, prompt, schema, stop):
@@ -106,7 +89,6 @@ class ExecutionWorker:
         self.runtime_factory = runtime_factory or self.build_runtime
 
     def build_runtime(self, task, execution):
-        Runtime, Tool = mac_runtime()
         scope, execution_id = task['scope'], execution['id']
 
         def progress(args):
@@ -137,7 +119,7 @@ class ExecutionWorker:
             return result
 
         def tool(name, description, properties, handler, required=()):
-            return Tool(name=name, description=description, handler=handler,
+            return DynamicTool(name=name, description=description, handler=handler,
                         input_schema=dict(type='object', properties=properties,
                                           required=list(required), additionalProperties=False))
 

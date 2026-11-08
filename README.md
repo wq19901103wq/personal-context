@@ -27,7 +27,7 @@ flowchart TB
     end
     READER[独立 wechat-reader 仓库：采集、保存、读取]
     READER --> WX
-    COMMON[common：公共契约、纯函数]
+    COMMON[common：公共契约、纯函数、Codex 接入]
     COMMON -.-> INPUT
     COMMON -.-> MEMORY
     COMMON -.-> PRESENT
@@ -41,15 +41,15 @@ flowchart TB
 | 原始信息输入层 | `inputs/` | 微信历史、设备转写、连接器分发；保存来源与原始时间，输出统一 `RawRecord`，不判断语义、不发送提醒 |
 | 记忆层 | `memory/` | 模型提取、SQLite 持久化、事实时效、用户纠正与相关记忆召回；不依赖网页或 push |
 | 展示层 | `presentation/` | 网页、静态资源与 push 投递；读取已保存结果，提交用户编辑，保存投递状态 |
-| 公共组件 | `common/` | 来源、身份、时间与 `RawRecord` 契约及纯函数；供三层与外部消费者使用 |
+| 公共组件 | `common/` | 来源、身份、时间与 `RawRecord` 契约、纯函数和薄 Codex 协议客户端；供各层与外部消费者使用 |
 
-`app.py`、`followup.py` 等负责应用组装与后台调度，`briefing.py`、`proactive.py` 组合记忆生成简报和建议；它们不代表额外业务层。`common/` 存放三层共用的契约与纯函数；微信采集、去重、原始 SQLite 保存和只读查询归独立的 [`wechat-reader` 仓库](https://github.com/wq19901103wq/wechat-reader)。`personal_context/` 提供历史／知识适配和跨项目 Python API。`inputs/`、`memory/`、`presentation/` 与 `common/` 直接位于仓库根目录，没有额外的应用包目录。`personal_assistant.py` 是旧命令与导入的兼容入口，业务实现直接依赖各层。
+`app.py`、`followup.py` 等负责应用组装与后台调度，`briefing.py`、`proactive.py` 组合记忆生成简报和建议；它们不代表额外业务层。`common/` 存放三层共用的契约、纯函数和模型协议接入；微信采集、去重、原始 SQLite 保存和只读查询归独立的 [`wechat-reader` 仓库](https://github.com/wq19901103wq/wechat-reader)。`personal_context/` 提供历史／知识适配和跨项目 Python API。`inputs/`、`memory/`、`presentation/` 与 `common/` 直接位于仓库根目录，没有额外的应用包目录。`personal_assistant.py` 是旧命令与导入的兼容入口，业务实现直接依赖各层。
 
 微信作为输入与微信作为 push 输出是两个独立方向：前者通过共用 `wechat-reader` 采集与读取原始历史，个人助理只读消费，后者使用 ClawBot 向本人投递。音箱已支持经过认证的最终文字转写，原始音频识别、具体品牌麦克风适配与飞书连接器仍待接入。新增来源接入 `RawRecord`；新增展示渠道消费同一记忆与业务结果，不复制提取逻辑或另建一份状态。
 
 ## 快速开始
 
-需要 Python 3.10+、Git、macOS 或 Linux（使用 `fcntl` 文件锁；原生 Windows 暂不支持）。本库与微信读取库按公开仓库维护，源码和依赖可通过 HTTPS 匿名获取，无需 GitHub token。依赖固定到微信读取库的完整提交号，不从 PyPI 查找同名包。以下本地手动待办、日程与网页无需微信、模型或 MAC：
+需要 Python 3.10+、Git、macOS 或 Linux（使用 `fcntl` 文件锁；原生 Windows 暂不支持）。本库与微信读取库公开后，源码和依赖可通过 HTTPS 匿名获取，无需 GitHub token。依赖固定到微信读取库的完整提交号，不从 PyPI 查找同名包。目前两个 GitHub 仓库尚未公开，发布需先公开微信读取库的固定提交，再公开本库；此前请使用下文“安装”中的本地联合开发方式。以下本地手动待办、日程与网页无需微信、模型或 MAC：
 
 ```sh
 python3 -m venv .venv
@@ -69,7 +69,7 @@ python3 -m venv .venv
 | --- | --- |
 | 读取微信 | 由独立 wechat-reader 或 RPA 采集、且当前用户可读的兼容 SQLite；在“来源”中绑定路径和账号 |
 | 读取既有知识 | 显式绑定 DH Share／JSON 或 RPA memory 目录；新库不预设私人知识来源 |
-| 模型提取、推荐、复杂任务 | 本机 MAC 的 `mac_system.agents.root_runtime`、已安装且登录的 Codex CLI；这部分尚不能只靠本仓库独立运行 |
+| 模型提取、推荐、复杂任务 | 已安装且登录的 Codex CLI，已验证版本为 0.144.1；不需要 MAC 源码或 Python 包 |
 | 微信 push | 已有 ClawBot/iLink 登录，加 `--wechat`；凭据保存在外部私有目录 |
 | 手机 HTTPS 入口 | 自有域名、隧道与持续在线的主机；下文安装脚本适用于 macOS launchd |
 
@@ -79,14 +79,14 @@ python3 -m venv .venv
 
 `data/`、数据库、日志、凭据、录音、截图、导出、备份、模型运行目录与缓存均排除在 Git 外。把自己的数据和配置放在 `data/` 或仓库外；示例域名、路径与账号均需自行替换。保存过的来源绑定继续保留，新建数据库需自行绑定知识来源。此仓库没有附带个人数据库、登录凭据或模型运行环境。
 
-代码按四库维护：本仓库 `personal-context` 保存个人助理，`wechat-reader` 单独保存微信原始读取能力，`wechat-mac-rpa` 和 `digital-human` 沿用现有仓库。四库均按公开代码库维护；聊天记录、数据库、截图、日志、凭据与个人知识材料保存在本地被 Git 忽略的位置。主项目尚未指定开源许可证，微信读取库保留原 RPA 的 MIT 许可。各库依赖与访问条件见 [架构与共用能力](docs/shared-capabilities.md#项目归属与依赖)。
+代码按四库维护：本仓库 `personal-context` 保存个人助理，`wechat-reader` 单独保存微信原始读取能力，`wechat-mac-rpa` 和 `digital-human` 沿用现有仓库。四库均按公开代码库维护；聊天记录、数据库、截图、日志、凭据与个人知识材料保存在本地被 Git 忽略的位置。主项目采用 [MIT 许可证](LICENSE)，微信读取库保留原 RPA 的 MIT 许可与署名。各库依赖与访问条件见 [架构与共用能力](docs/shared-capabilities.md#项目归属与依赖)。
 
 ## 已实现
 
 - 来源、账号、会话、消息引用、发送者和时间的公共类型。
 - SQLite 只读适配器：列会话、最近消息、跨会话文字搜索、时间筛选和分页。
-- DH `observed` 输入转换；两个项目均有历史命令入口和 `--history-chat` 草稿入口。
-- 共用知识 API 与两仓 `scripts/knowledge.py`：读取 DH 原生 Wiki/Share、RPA Wiki 和人工事实/纠正；按人物引用、明确账号或文字查询。
+- DH `observed` 输入转换；共用历史命令，以及 RPA 的 `--history-chat` 草稿入口。
+- 共用知识 API 与 `python -m personal_context.knowledge_cli`：读取 DH 原生 Wiki/Share、RPA Wiki 和人工事实/纠正；按人物引用、明确账号或文字查询。
 - 从已有微信记录一次提取待办、日程、人物兴趣／地址／偏好，以及匹配新信息的主动建议；原文依据随派生记录保存。
 - 人物画像和“为你发现”看板；本人明确画像与新活动／资料匹配时，通过现有 ClawBot 主动推送。
 - 助理画像通过同一知识 API 供个人助理、RPA 和 DH 实时能力读取。
@@ -277,13 +277,20 @@ python -m personal_assistant stop 1
 
 首版支持资料整理、分析、方案和草稿，尚未接入浏览网页、向第三人发消息或修改外部系统的工具。结果中的草稿不会自动发送。微信原始记录只限当前待办关联会话，知识只来自创建时绑定的来源；页面保存公开进展，不保存模型内部推理。
 
-信息提取与复杂任务需要已登录的 Codex CLI，以及本机 MAC 的 `mac_system.agents.root_runtime`。微信聊天和设备转写中的待办、日程、画像与建议提取默认使用 `gpt-6-luna`，可通过 `PERSONAL_ASSISTANT_EXTRACTION_MODEL` 指定；复杂任务的计划与执行默认使用 `gpt-6.1-sol`，沿用 `PERSONAL_ASSISTANT_MODEL` 指定。两者推理强度均为 `medium`，模型配置互不影响。
+信息提取、推荐与复杂任务直接连接 Codex CLI 的原生 app-server，不依赖 MAC。微信聊天和设备转写中的待办、日程、画像与建议提取默认使用 `gpt-6-luna`，可通过 `PERSONAL_ASSISTANT_EXTRACTION_MODEL` 指定；复杂任务的计划与执行默认使用 `gpt-6.1-sol`，沿用 `PERSONAL_ASSISTANT_MODEL` 指定。两者推理强度均为 `medium`，模型配置互不影响。
 
-优先使用已安装的 MAC 模块，也可用 `MAC_SYSTEM_ROOT` 指定 MAC 仓库（默认 `~/multi-agent-coding-system`）；`CODEX_BIN` 指定 CLI。执行复用原生 app-server 的规划、工具调用、结构化结果和线程续跑，不另造执行循环。独立运行目录位于工作库旁的 `runtime/`，仅复用现有 Codex 登录，不加载全局应用插件和编码工具。
+已验证的协议与 CLI 版本为 `0.144.1`。安装 Node.js 18+ 后运行：
+
+```sh
+npm install -g @openai/codex@0.144.1
+codex login
+```
+
+`CODEX_BIN` 可指定 CLI 路径；`CODEX_HOME` 可指定已有登录目录，默认 `~/.codex`。`common/codex_runtime.py` 只处理 stdio 协议和受限业务工具接入，模型、工具循环、结构化输出及持久线程均由 Codex 原生实现。独立运行目录位于工作库旁的 `runtime/`，仅链接现有登录，不加载全局配置、应用插件和编码工具。登录与模型访问额度由使用者自行提供。
 
 ## 安装
 
-Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依赖标准库；信息提取和复杂任务另需上述本机 MAC 与 Codex 运行环境。在每个消费者自己的虚拟环境中安装本包；安装会通过公开 HTTPS 地址自动获取固定版本的微信读取依赖，无需 GitHub 认证：
+Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依赖标准库；模型功能另需上述 Codex CLI 和登录。在每个消费者自己的虚拟环境中安装本包。两个仓库公开后，以下命令会通过 HTTPS 自动获取固定版本的微信读取依赖，无需 GitHub 认证：
 
 ```sh
 .venv/bin/python -m pip install -e /path/to/personal-context
@@ -291,7 +298,7 @@ Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依�
 
 离线或联合开发时，先将独立的 `wechat-reader` 仓库检出到消费者所固定的提交，再执行 `.venv/bin/python -m pip install --no-deps -e /path/to/wechat-reader -e /path/to/personal-context`。采集端需另外安装微信读取库的 `[capture]` 依赖；助理只读查询无需这些依赖。
 
-RPA、DH 等消费者需分别在各自的虚拟环境安装本包；下面的 `scripts/` 入口属于对应消费者仓库，并未包含在本仓库中。
+RPA、DH 等消费者需分别在各自的虚拟环境安装本包。调整顶层目录或新增顶层模块后，要在每个消费者环境重新执行可编辑安装；仅更新源码不会刷新安装时生成的模块映射。下面的历史和知识查询使用本包自带的模块入口，不依赖消费者仓库中的本地包装脚本。
 
 ## 微信原始消息组件
 
@@ -299,16 +306,16 @@ RPA、DH 等消费者需分别在各自的虚拟环境安装本包；下面的 `
 
 ## 读取现有微信记录
 
-以下命令在 RPA 或 DH 仓库中均可使用：
+在已安装本包的 RPA、DH 或助理虚拟环境中使用：
 
 ```sh
-.venv/bin/python scripts/wechat_history.py chats --limit 20
-.venv/bin/python scripts/wechat_history.py recent --chat 'CHAT_ID' --limit 50
-.venv/bin/python scripts/wechat_history.py messages --contains '方案' --limit 20
-.venv/bin/python scripts/wechat_history.py dh-input --chat 'CHAT_ID' --limit 50
+.venv/bin/python -m personal_context chats --limit 20
+.venv/bin/python -m personal_context recent --chat 'CHAT_ID' --limit 50
+.venv/bin/python -m personal_context messages --contains '方案' --limit 20
+.venv/bin/python -m personal_context dh-input --chat 'CHAT_ID' --limit 50
 ```
 
-也可以用 `wechat-history` 或在本仓库用 `python -m personal_context`。输出为 JSON。
+也可以用 `wechat-history`。输出为 JSON。
 
 数据库默认取 `WECHAT_HISTORY_DB`，其次 `~/wechat-mac-rpa/data/db/chat_history.db`。历史命令的数据源参数放在子命令前：
 
@@ -323,14 +330,14 @@ wechat-history --db /path/to/chat_history.db --account my-wechat chats --limit 2
 在 RPA 或 DH 仓库调用同一入口；知识来源放在子命令前，显式选择所需文件或目录：
 
 ```sh
-.venv/bin/python scripts/knowledge.py --dh-knowledge /path/to/share/SHARE_ID summary
-.venv/bin/python scripts/knowledge.py --dh-knowledge /path/to/share/SHARE_ID people --contains '姓名'
-.venv/bin/python scripts/knowledge.py --dh-knowledge /path/to/share/SHARE_ID facts --person-account 'wxid_example'
-.venv/bin/python scripts/knowledge.py --rpa-memory /path/to/rpa/data/memory --account my-wechat documents --contains '方案'
-.venv/bin/python scripts/knowledge.py --assistant-db /path/to/personal-agent/data/assistant.db facts --contains '兴趣'
+.venv/bin/python -m personal_context.knowledge_cli --dh-knowledge /path/to/share/SHARE_ID summary
+.venv/bin/python -m personal_context.knowledge_cli --dh-knowledge /path/to/share/SHARE_ID people --contains '姓名'
+.venv/bin/python -m personal_context.knowledge_cli --dh-knowledge /path/to/share/SHARE_ID facts --person-account 'wxid_example'
+.venv/bin/python -m personal_context.knowledge_cli --rpa-memory /path/to/rpa/data/memory --account my-wechat documents --contains '方案'
+.venv/bin/python -m personal_context.knowledge_cli --assistant-db /path/to/personal-agent/data/assistant.db facts --contains '兴趣'
 ```
 
-也可运行 `python -m personal_context.knowledge_cli`。三个来源参数都可重复并组合使用；`--account` 只绑定所选 RPA 目录，DH 和助理画像从原生记录读取所属账号。`summary` 输出来源和数量，其余命令输出 `usage=current_snapshot` 和 `items`。搜索采用文字子串。
+三个来源参数都可重复并组合使用；`--account` 只绑定所选 RPA 目录，DH 和助理画像从原生记录读取所属账号。`summary` 输出来源和数量，其余命令输出 `usage=current_snapshot` 和 `items`。搜索采用文字子串。
 
 DH 支持 `wiki_structured_v1`、`source_bound_wiki_library_v1` JSON，以及显式指定的 Share 目录。不自动选择最新 Share。人物、属性、关系、事件、称呼、时态、不确定性和证据定位均保留。查询 `--person-account` 只跟随 `exact_account` 身份；同名人物仍是独立记录。
 
@@ -362,13 +369,9 @@ RPA 原有草稿客户端新增历史模式，沿用本机 DH 配置：
 .venv/bin/python scripts/digital_human_draft.py --history-chat 'CHAT_ID' --history-limit 50
 ```
 
-DH 原生入口也可直接使用：
+该命令会按既有配置请求模型。输入是 DH 的线上观察格式，RPA 行号不会被当作冻结资料的消息 ID；未知角色、空文本不进入上下文。查看输入可先运行 `python -m personal_context dh-input --chat 'CHAT_ID' --limit 50`。
 
-```sh
-.venv/bin/python scripts/draft_stdio.py --instance INSTANCE --history-chat 'CHAT_ID' --history-limit 50
-```
-
-这两个命令会按既有配置请求模型。输入是 DH 的线上观察格式，RPA 行号不会被当作冻结资料的消息 ID；未知角色、空文本不进入上下文。查看输入可先运行 `wechat_history.py dh-input`。
+DH 本地的 `scripts/draft_stdio.py` 历史草稿入口尚未纳入其 Git 版本，不作为公开安装步骤。两个消费者中的 `scripts/wechat_history.py`、`scripts/knowledge.py` 也仍是未跟踪的本地包装脚本；查询请使用上述随包提供的模块入口。
 
 ## Python API
 

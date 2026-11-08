@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Personal assistant with source inputs, shared memory, web views and push delivery"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {file = "LICENSE"}
 dependencies = ["wechat-reader @ git+https://github.com/wq19901103wq/wechat-reader.git@1fe7234493412fa6a0976739eb678169da5b2ab4"]
 
 [project.urls]

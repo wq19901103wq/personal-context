@@ -2,7 +2,7 @@
 
 更新：2026-11-07。微信历史、设备最终转写、记忆提取、人物画像、相关建议、每日简报与变化提醒、待办跟进和网页／微信交互已实现。飞书、音箱品牌适配及外部动作工具尚未接入。
 
-主链路按三层组织：**原始信息输入层 → 记忆层 → 展示层**。记忆层包含大模型结构化处理、数据库保存、时效管理和查询召回；展示层包含网页和 push。公共契约与纯函数放在 `common/`。微信手工交办和编辑是补充入口；聊天里发现的承诺、兴趣、地点和新信息才是持续输入。
+主链路按三层组织：**原始信息输入层 → 记忆层 → 展示层**。记忆层包含大模型结构化处理、数据库保存、时效管理和查询召回；展示层包含网页和 push。公共契约、纯函数和薄 Codex 协议客户端放在 `common/`。微信手工交办和编辑是补充入口；聊天里发现的承诺、兴趣、地点和新信息才是持续输入。
 
 ## Today 调研及产品方向
 
@@ -34,7 +34,7 @@
 | digital-human | Share 知识维护与按题检索、persona/style/fewshot、草稿生成、原有 Gen/Judge 流程 | 草稿进程；原生知识供共用适配器读取 |
 | 个人助理 personal_assistant | 信息提取、人物画像、主动建议、待办、唤醒时间、跟进快照、执行队列、公开进展、结果、收件箱与投递状态 | dashboard、CLI、微信推送与快捷操作、手机任务详情与补充续跑 |
 | ClawBot / iLink | 已有微信登录和本人会话 | 本人微信待办推送，personal_context 提供薄适配器 |
-| multi-agent-coding-system | 原生 Codex 线程、工具执行与事件协议；独立的编码项目状态 | 个人助理复用原生 app-server runtime，编码任务派发后续接入 |
+| Codex CLI | 原生模型与工具循环、结构化输出和持久线程 | 助理由 `common/codex_runtime.py` 直接连接 app-server，无 MAC 依赖 |
 
 GitHub 按四库分工：
 
@@ -45,7 +45,9 @@ GitHub 按四库分工：
 | `wechat-mac-rpa` | 保留现有公开库与历史 | 与助理使用相同提交的 `wechat-reader`；DH 仍走既有草稿子进程 |
 | `digital-human` | 保留现有公开库与历史 | 不新增采集职责；实时历史模式可选安装 `personal-context` 及其读取依赖 |
 
-`wechat-reader` 源码只在独立库维护，消费者不保留副本或整个 RPA submodule。助理的 `pyproject.toml` 与 RPA 的 `requirements.txt` 使用相同完整 Git 提交号；升级时一并更新。包未发布到 PyPI，依赖通过公开 GitHub HTTPS 地址安装，无需 GitHub token。RPA 的 GitHub Actions 与外部 fork 使用相同的匿名安装方式。四库只公开代码与通用样例，聊天记录、数据库、截图、日志、凭据和个人知识材料继续留在本地被 Git 忽略的位置。
+`wechat-reader` 源码只在独立库维护，消费者不保留副本或整个 RPA submodule。助理的 `pyproject.toml` 与 RPA 的 `requirements.txt` 使用相同完整 Git 提交号；升级时一并更新。包未发布到 PyPI，仓库公开后依赖通过 GitHub HTTPS 地址安装，无需 GitHub token。RPA 的 GitHub Actions 与外部 fork 使用相同的匿名安装方式。目前助理和读取库尚未公开，发布需先公开读取库中的固定提交，再公开依赖它的助理版本；此前使用本地源码或 wheel。四库只公开代码与通用样例，聊天记录、数据库、截图、日志、凭据和个人知识材料继续留在本地被 Git 忽略的位置。
+
+模型提取、推荐和复杂任务直接连接已登录的 Codex CLI，已验证版本为 `0.144.1`，安装和登录步骤见 README。薄协议客户端在 `common/codex_runtime.py`，没有 MAC 导入或本机源码目录依赖。历史／知识查询、手动待办、日程和本地网页无需模型即可使用。
 
 每个消费者使用自己的解释器与环境；离线联合开发可安装已检出的本地源码或 wheel。仓库拆分不迁移原始库、不改变服务配置，已安装 wheel 的采集服务继续运行。数据、凭据、日志、截图和备份都留在被 Git 忽略的本地位置。
 
@@ -73,7 +75,7 @@ flowchart TB
     RAW --> MODEL
     RECALL --> DASH
     RECALL --> PUSH
-    COMMON[common：记录契约、标识、字段与日程计算]
+    COMMON[common：记录契约、字段、日程计算、Codex 接入]
     COMMON -.-> INPUT
     COMMON -.-> MEMORY
     COMMON -.-> PRESENTATION
@@ -85,24 +87,23 @@ flowchart TB
 
 ## 本轮已经接通
 
-`personal_context` 提供历史与知识适配的 Python API，依赖 Python 3.10+ 标准库。RPA、DH 等消费者可在各自虚拟环境安装本仓库；下列 `scripts/` 入口属于对应消费者仓库。
+`personal_context` 提供历史与知识适配的 Python API，依赖 Python 3.10+ 标准库。RPA、DH 等消费者可在各自虚拟环境安装本仓库；历史和知识查询使用随包提供的模块入口。
 
 | 入口 | 实际用途 |
 | --- | --- |
 | 共用 `wechat-history` / `python -m personal_context` | 列会话、读最近消息、跨会话文字搜索、时间范围和分页、导出 DH 输入 |
-| 两仓 `scripts/wechat_history.py` | 薄入口，调用同一份共用实现 |
 | RPA `scripts/digital_human_draft.py --history-chat …` | 从原始库读取上下文，调用既有 DH 草稿客户端 |
-| DH `scripts/draft_stdio.py --instance … --history-chat …` | 从同一原始库读取上下文，构造一次原生草稿请求 |
 | 共用 `python -m personal_context.knowledge_cli` | 查询当前知识快照中的人物、结构化事实和 Wiki 文档 |
-| 两仓 `scripts/knowledge.py` | 调用同一知识读取实现，显式选择 DH Share/原生 JSON、RPA memory 目录 |
 | `python -m personal_assistant --wechat serve` | 本地待办页面与跟进进程，使用同一历史/知识 API，向本人微信推送提醒 |
 | 手机任务页 / `personal_assistant advance ID '需求'` | 后台分步执行，保存公开计划、进展、结果和补充问题；沿用原生线程继续 |
 | dashboard“从微信发现” / `personal_assistant extract` | 从保存的聊天提取待办、人物兴趣与地点，结合新内容发现相关建议，可每小时自动扫描 |
 | `knowledge_cli --assistant-db …` / `open_assistant_knowledge` | 把助理画像映射为同一人物与事实 API，供多个项目读取 |
 
-共用配置：`--history-db`、`--history-account`、`--history-source`；草稿入口另有 `--history-limit`。数据库默认取 `WECHAT_HISTORY_DB`，其次 `~/wechat-mac-rpa/data/db/chat_history.db`。
+两仓的 `scripts/wechat_history.py`、`scripts/knowledge.py` 和 DH 的 `scripts/draft_stdio.py` 仍是未跟踪的本地文件，不作为公开版本的安装入口。历史与知识查询分别使用上表中的模块；DH 草稿历史模式尚未纳入其 Git 版本。
 
-历史适配器使用 SQLite `mode=ro`，每次读取后关闭连接。未复制微信库、创建服务或导入 DH 训练材料。两个草稿命令会按既有配置请求模型；本轮接入验收只读取记录和生成输入，没有运行真实生成。
+RPA 草稿入口使用 `--history-db`、`--history-account`、`--history-source` 和 `--history-limit`。独立历史查询使用 `--db`、`--account`、`--source`。数据库默认取 `WECHAT_HISTORY_DB`，其次 `~/wechat-mac-rpa/data/db/chat_history.db`。
+
+历史适配器使用 SQLite `mode=ro`，每次读取后关闭连接。未复制微信库、创建服务或导入 DH 训练材料。草稿命令会按既有配置请求模型；本轮接入验收只读取记录和生成输入，没有运行真实生成。
 
 知识适配器只读原生文件或助理数据库，不导入两仓的 `src` 包。`open_dh_knowledge(path)`、`open_rpa_knowledge(path, account_id=…)` 与 `open_assistant_knowledge(path)` 都返回 `KnowledgeReader`；`combine_knowledge` 组合显式选择的来源，提供 `people / facts / documents` 查询。无需初始化 DH 的冻结 case 或 RPA 的后台记忆 worker。
 
@@ -175,7 +176,7 @@ RPA 读取三类 Wiki 与现有 aliases/facts/corrections，不实例化 MemoryE
 
 待办优先从聊天自动发现，也可通过本地页面或 CLI 补充；完成、取消和改期可通过微信或手机详情页。提取待办在本地保留来源关联，用于记忆更新；手机详情页展示安排与操作。新建时可要求执行，也可在详情页或 CLI 提交后续需求。进程运行时才提取、跟进和执行，电脑休眠会暂停，恢复后处理到期任务。
 
-复杂任务复用 MAC 的 `CodexAppServerThread`，一个 Task 对应一个原生 thread，每轮用户需求对应一条 execution。SQLite 队列串行消费，单任务最多一个排队或运行项；提醒 worker 独立运行。模型通过 `report_progress` 和原生计划事件更新公开计划，通过受限工具读取当前任务绑定的微信会话与知识来源，自行决定分步方式，不设固定角色流水线。
+复杂任务通过共用协议客户端连接 Codex 原生 app-server，一个 Task 对应一个原生 thread，每轮用户需求对应一条 execution。SQLite 队列串行消费，单任务最多一个排队或运行项；提醒 worker 独立运行。模型通过 `report_progress` 和原生计划事件更新公开计划，通过受限工具读取当前任务绑定的微信会话与知识来源，自行决定分步方式，不设固定角色流水线。
 
 执行状态为 `queued / running / completed / needs_input / failed / interrupted`。`completed` 表示本轮需求已完成，不自动把 Task 标为 done；`needs_input` 保存具体问题，在同一详情页补充后续跑同一原生线程。停止会中断本轮，保留已有进展。服务重启将遗留 running 标为 interrupted，queued 继续排队，已完成业务不自动重跑。结果、终态、提醒和微信 outbox 一起提交，通知失败只重试投递。
 
@@ -231,7 +232,7 @@ RPA 读取三类 Wiki 与现有 aliases/facts/corrections，不实例化 MemoryE
 | 人物画像与主动建议 | 个人助理 SQLite | 画像经 `open_assistant_knowledge` 投影为共用人物与事实；建议由看板和微信消费 |
 | 项目、目标、任务、跟进 Run 与 Execution | 个人助理 SQLite | 保存业务状态、计划、进展和成果 |
 | DH 人设、Fewshot、冻结知识和实验数据 | DH 原生版本 | 继续按现有版本绑定，实时记录另走适配器 |
-| 模型原生线程 | 独立 Codex home | 个人助理的 task_threads 保存引用，MAC runtime 负责调用；MAC 编码项目状态独立 |
+| 模型原生线程 | 独立 Codex home | 个人助理的 task_threads 保存引用，共用协议客户端负责调用；不依赖 MAC 项目状态 |
 
 知识和工作状态在同一派生 SQLite 中分表保存。搜索先使用现有文字检索与 DH 的知识能力，确有需要再加 FTS / 向量索引。
 
@@ -241,7 +242,7 @@ RPA 读取三类 Wiki 与现有 aliases/facts/corrections，不实例化 MemoryE
 
 当前 `KnowledgeReader` 已提供人物、事实和文档的文字查询，以及按完整人物引用、明确账号筛选事实。所有返回项带来源，不自动归并同名人物；搜索先采用子串，不增加向量库。
 
-新增画像可通过 `open_assistant_knowledge` 或两仓已有 `scripts/knowledge.py --assistant-db …` 读取，与 DH、RPA 来源组合；模型任务的知识读取也使用同一入口。已忽略的画像不返回。现有 DH `SearchMemory` 仍处理其原生冻结 case 和时序过滤；不将实时画像自动写入 DH 的冻结训练资料。
+新增画像可通过 `open_assistant_knowledge` 或 `python -m personal_context.knowledge_cli --assistant-db …` 读取，与 DH、RPA 来源组合；模型任务的知识读取也使用同一入口。已忽略的画像不返回。现有 DH `SearchMemory` 仍处理其原生冻结 case 和时序过滤；不将实时画像自动写入 DH 的冻结训练资料。
 
 设备最终转写已通过认证输入接入；后续飞书连接器和音箱品牌桥接输出同一 `common.records.RawRecord`，沿用记忆和展示层。日程已复用同一次模型输出、SQLite 和看板，不另写一套平台。跨来源人物归并需要真实身份依据，有实际需求后再补。
 
@@ -278,8 +279,8 @@ RPA 当前没有可靠的变更日志；分页游标只是 `(recorded_at, row_id
 - [共用知识类型与查询](../personal_context/knowledge.py)、[DH 知识适配器](../personal_context/dh_knowledge.py)、[RPA 知识适配器](../personal_context/rpa_knowledge.py)、[知识命令](../personal_context/knowledge_cli.py)。
 - [统一原始记录](../common/records.py)、[微信连接器](../inputs/sources.py)、[信息提取](../memory/extraction.py)、[画像共用读取](../personal_context/assistant_knowledge.py)。
 - [待办存储](../memory/store.py)、[跟进循环](../followup.py)、[页面入口](../presentation/web.py)、[push 投递](../presentation/push.py)、[ClawBot 适配器](../personal_context/wechat_push.py)。
-- RPA 消费者入口：其仓库中的 `scripts/digital_human_draft.py`、`scripts/wechat_history.py`。
-- DH 消费者入口：其仓库中的 `scripts/draft_stdio.py`、`scripts/wechat_history.py`、`src/share/knowledge_view.py`。
+- RPA 草稿消费者入口：其仓库中的 `scripts/digital_human_draft.py`。
+- RPA／DH 历史与知识查询：安装本包后使用 `python -m personal_context` 和 `python -m personal_context.knowledge_cli`。
 
 ## 微信读取组件
 

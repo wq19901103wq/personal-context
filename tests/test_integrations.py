@@ -67,11 +67,9 @@ class IntegrationsTest(unittest.TestCase):
         integrations = self.configure(dict(mcp_servers=dict(dianping=dict(
             command='node', args=['/tool/dist/index.js'], enabled_tools=['check_session']))))
         store = TaskStore(self.root/'assistant.db')
-        with patch('personal_assistant.execution.mac_runtime') as runtime:
-            runtime.return_value = (Mock(), None)
+        with patch('personal_assistant.execution.CodexRuntime') as factory:
             worker = ProactiveWorker(store)
             worker.runtime_factory()
-            factory = runtime.return_value[0]
             config = factory.call_args.kwargs['thread_config']
             self.assertEqual(config['mcp_servers'], integrations.mcp_servers())
             self.assertEqual(config['model'], 'gpt-6-luna')
