@@ -45,7 +45,7 @@ GitHub 按四库分工：
 | `wechat-mac-rpa` | 保留现有公开库与历史 | 与助理使用相同提交的 `wechat-reader`；DH 仍走既有草稿子进程 |
 | `digital-human` | 保留现有公开库与历史 | 不新增采集职责；实时历史模式可选安装 `personal-context` 及其读取依赖 |
 
-`wechat-reader` 源码只在独立库维护，消费者不保留副本或整个 RPA submodule。助理的 `pyproject.toml` 与 RPA 的 `requirements.txt` 使用相同完整 Git 提交号；升级时一并更新。包未发布到 PyPI，仓库公开后依赖通过 GitHub HTTPS 地址安装，无需 GitHub token。RPA 的 GitHub Actions 与外部 fork 使用相同的匿名安装方式。目前助理和读取库尚未公开，发布需先公开读取库中的固定提交，再公开依赖它的助理版本；此前使用本地源码或 wheel。四库只公开代码与通用样例，聊天记录、数据库、截图、日志、凭据和个人知识材料继续留在本地被 Git 忽略的位置。
+`wechat-reader` 源码只在独立库维护，消费者不保留副本或整个 RPA submodule。助理的 `pyproject.toml` 与 RPA 的 `requirements.txt` 使用相同完整 Git 提交号；升级时一并更新。助理和读取库均已公开；包未发布到 PyPI，依赖通过 GitHub HTTPS 地址安装，无需 GitHub token。RPA 的 GitHub Actions 与外部 fork 使用相同的匿名安装方式；离线或联合开发可使用本地源码或 wheel。四库只公开代码与通用样例，聊天记录、数据库、截图、日志、凭据和个人知识材料继续留在本地被 Git 忽略的位置。
 
 模型提取、推荐和复杂任务直接连接已登录的 Codex CLI，已验证版本为 `0.144.1`，安装和登录步骤见 README。薄协议客户端在 `common/codex_runtime.py`，没有 MAC 导入或本机源码目录依赖。历史／知识查询、手动待办、日程和本地网页无需模型即可使用。
 

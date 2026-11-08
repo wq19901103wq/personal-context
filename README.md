@@ -49,7 +49,7 @@ flowchart TB
 
 ## 快速开始
 
-需要 Python 3.10+、Git、macOS 或 Linux（使用 `fcntl` 文件锁；原生 Windows 暂不支持）。本库与微信读取库公开后，源码和依赖可通过 HTTPS 匿名获取，无需 GitHub token。依赖固定到微信读取库的完整提交号，不从 PyPI 查找同名包。目前两个 GitHub 仓库尚未公开，发布需先公开微信读取库的固定提交，再公开本库；此前请使用下文“安装”中的本地联合开发方式。以下本地手动待办、日程与网页无需微信、模型或 MAC：
+需要 Python 3.10+、Git、macOS 或 Linux（使用 `fcntl` 文件锁；原生 Windows 暂不支持）。本库与微信读取库均已公开，源码和依赖可通过 HTTPS 匿名获取，无需 GitHub token。依赖固定到微信读取库的完整提交号，不从 PyPI 查找同名包。以下本地手动待办、日程与网页无需微信、模型或 MAC：
 
 ```sh
 python3 -m venv .venv
@@ -290,7 +290,7 @@ codex login
 
 ## 安装
 
-Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依赖标准库；模型功能另需上述 Codex CLI 和登录。在每个消费者自己的虚拟环境中安装本包。两个仓库公开后，以下命令会通过 HTTPS 自动获取固定版本的微信读取依赖，无需 GitHub 认证：
+Python 3.10+，macOS 或 Linux。历史、知识、待办存储和提醒仅依赖标准库；模型功能另需上述 Codex CLI 和登录。在每个消费者自己的虚拟环境中安装本包。以下命令会通过 HTTPS 自动获取固定版本的微信读取依赖，无需 GitHub 认证：
 
 ```sh
 .venv/bin/python -m pip install -e /path/to/personal-context
