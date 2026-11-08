@@ -104,6 +104,7 @@ class Briefings:
     def __init__(self, store, *, wechat=None):
         self.store = store
         self.wechat = wechat
+        self._daily_cache = None
 
     @staticmethod
     def read_setting(db, key, default):
@@ -139,11 +140,14 @@ class Briefings:
 
     def snapshot_in(self, db):
         result = {}
-        for row in db.execute('SELECT * FROM tasks'):
-            result['task:' + str(row['id'])] = {k: row[k] for k in TASK_FIELDS}
-        for row in db.execute('SELECT * FROM calendar_events'):
-            event = self.store.event_row(row)
-            result['event:' + str(row['id'])] = {k: event[k] for k in EVENT_FIELDS}
+        for row in db.execute('SELECT ' + ','.join(TASK_FIELDS) + ' FROM tasks'):
+            result['task:' + str(row['id'])] = dict(row)
+        columns = ','.join('recurrence_json' if k == 'recurrence' else k for k in EVENT_FIELDS)
+        for row in db.execute('SELECT ' + columns + ' FROM calendar_events'):
+            event = dict(row)
+            event['all_day'] = bool(event['all_day'])
+            event['recurrence'] = json.loads(event.pop('recurrence_json') or 'null')
+            result['event:' + str(row['id'])] = event
         return result
 
     def daily(self, snapshot, now, timezone):
@@ -173,7 +177,7 @@ class Briefings:
             db.execute('BEGIN IMMEDIATE')
             config, snapshot = self.config_in(db), self.snapshot_in(db)
             monitor = self.read_setting(db, 'briefing_monitor', None)
-            pending = monitor['pending'] if monitor else {}
+            pending = dict(monitor['pending']) if monitor else {}
             observed = delta(monitor['snapshot'], snapshot, now, timezone) if monitor else {}
             for key in pending:
                 if monitor['snapshot'].get(key) != snapshot.get(key):
@@ -188,14 +192,28 @@ class Briefings:
             if not config['changes_enabled']:
                 pending = {}
                 db.execute("UPDATE briefing_deliveries SET status='disabled' WHERE kind='changes' AND status IN ('pending','retry')")
-            self.write_setting(db, 'briefing_monitor', dict(snapshot=snapshot, pending=pending, changed_at=changed_at))
-            daily = self.daily(snapshot, now, timezone)
-            db.execute("UPDATE briefing_deliveries SET status='expired' WHERE kind='daily' AND day!=? AND status IN ('pending','retry')", (daily['day'],))
+            updated = dict(snapshot=snapshot, pending=pending, changed_at=changed_at)
+            if updated != monitor:
+                self.write_setting(db, 'briefing_monitor', updated)
+            day = bounds(now, timezone)[0]
+            db.execute("UPDATE briefing_deliveries SET status='expired' WHERE kind='daily' AND day!=? AND status IN ('pending','retry')", (day,))
             if config['daily_enabled']:
-                db.execute("INSERT OR IGNORE INTO briefing_deliveries (kind,day,title,body,items_json,client_id,created_at) VALUES ('daily',?,?,?,?,?,?)",
-                           (daily['day'], daily['title'], daily['body'], json.dumps(daily['sections'], ensure_ascii=False), 'briefing-' + uuid4().hex, now))
-                db.execute("UPDATE briefing_deliveries SET body=?,items_json=?,status=CASE WHEN status='disabled' THEN 'pending' ELSE status END WHERE kind='daily' AND day=? AND status IN ('pending','retry','disabled')",
-                           (daily['body'], json.dumps(daily['sections'], ensure_ascii=False), daily['day']))
+                row = db.execute("SELECT id,status,body,items_json FROM briefing_deliveries WHERE kind='daily' AND day=?", (day,)).fetchone()
+                if row is None or row['status'] in ('pending', 'retry', 'disabled'):
+                    overdue = frozenset(k for k, v in snapshot.items() if k.startswith('task:') and
+                                        v['deleted_at'] is None and v['status'] in ('open', 'waiting') and
+                                        v['due_at'] is not None and v['due_at'] < now)
+                    key = (snapshot, day, timezone, overdue)
+                    if self._daily_cache is None or self._daily_cache[0] != key:
+                        daily = self.daily(snapshot, now, timezone)
+                        self._daily_cache = (key, daily, json.dumps(daily['sections'], ensure_ascii=False))
+                    _, daily, items_json = self._daily_cache
+                    if row is None:
+                        db.execute("INSERT INTO briefing_deliveries (kind,day,title,body,items_json,client_id,created_at) VALUES ('daily',?,?,?,?,?,?)",
+                                   (day, daily['title'], daily['body'], items_json, 'briefing-' + uuid4().hex, now))
+                    elif row['status'] == 'disabled' or (row['body'], row['items_json']) != (daily['body'], items_json):
+                        db.execute("UPDATE briefing_deliveries SET body=?,items_json=?,status=CASE WHEN status='disabled' THEN 'pending' ELSE status END WHERE id=?",
+                                   (daily['body'], items_json, row['id']))
             else:
                 db.execute("UPDATE briefing_deliveries SET status='disabled' WHERE kind='daily' AND status IN ('pending','retry')")
 

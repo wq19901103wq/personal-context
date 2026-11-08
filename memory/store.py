@@ -834,6 +834,19 @@ class TaskStore:
                               'ORDER BY created_at, record_id', (kind, item_id)).fetchall()
         return [json.loads(row[0]) for row in rows]
 
+    def evidence_for(self, kind, item_ids):
+        item_ids = tuple(item_ids)
+        if not item_ids:
+            return {}
+        with self.connect() as db:
+            rows = db.execute('SELECT item_id,record_json FROM item_evidence WHERE kind=? AND item_id IN (' +
+                              ','.join('?' for _ in item_ids) + ') ORDER BY created_at,record_id',
+                              (kind, *item_ids)).fetchall()
+        grouped = {}
+        for row in rows:
+            grouped.setdefault(row['item_id'], []).append(json.loads(row['record_json']))
+        return grouped
+
     def create_event_in(self, db, *, title, notes='', starts_at=None, ends_at=None, all_day=False,
                         timezone='Asia/Shanghai', location='', time_text='', status='confirmed',
                         scheduled_date=None, time_period='', remind_before_minutes=30, scope=None, recurrence=None, now):

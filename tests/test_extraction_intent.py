@@ -1,7 +1,8 @@
 """Business regressions for intent, saved context and withdrawing false extractions."""
 
 import asyncio
-from dataclasses import asdict
+from contextlib import contextmanager
+from dataclasses import asdict, replace
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ from tempfile import TemporaryDirectory
 from threading import Event
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from personal_assistant.extraction import ExtractionWorker, INSTRUCTIONS, source_key
 from personal_assistant.execution import build_runtime
@@ -39,6 +41,113 @@ def output(*tasks, events=()):
 
 
 class ExtractionIntentTest(unittest.TestCase):
+    def test_shared_originals_are_loaded_once_and_keep_task_event_updates(self):
+        with TemporaryDirectory() as directory:
+            store = TaskStore(Path(directory)/'assistant.db')
+            shared, detail, fresh = (record(1, '请发送付款凭证'), record(2, '周五一起核对'),
+                                     record(3, '好，我补充发送，再一起核对'))
+            first = store.create(description='发送凭证', scope=SCOPE)
+            second = store.create(description='补充附件', scope=SCOPE)
+            event = store.create_event(title='核对付款', scope=SCOPE)
+            with store.connect() as db:
+                for kind, item, records in [('task', first, [shared]), ('task', second, [shared]),
+                                            ('event', event, [shared, detail])]:
+                    for r in records:
+                        db.execute('INSERT INTO item_evidence VALUES (?,?,?,?,?,?,?)',
+                            (kind, item['id'], source_key(SCOPE), r.id, r.content_hash,
+                             json.dumps(asdict(r)), r.time.recorded_at))
+            prompts = []
+            changed = task(3, task_id=first['id'])
+            changed['evidence_record_ids'] = ['1', '3']
+            changed_event = dict(event_id=event['id'], title='共同核对付款', notes='', reason='',
+                intent='action', anchor_record_id='3', evidence_record_ids=['2', '3'],
+                involvement=dict(state='confirmed', self_role='核对付款', evidence_record_ids=['3']),
+                time_action='keep', starts_at=None, ends_at=None, scheduled_date=None, time_period='',
+                all_day=False, location=None, time_text='', status=None)
+
+            class Runtime:
+                async def create_thread(self):
+                    pass
+
+                async def run_turn(self, prompt, **kwargs):
+                    prompts.append(json.loads(prompt))
+                    return SimpleNamespace(status='completed', final_message=json.dumps(
+                        output(changed, events=[changed_event])))
+
+                async def close(self):
+                    pass
+
+            worker = ExtractionWorker(store, source_loader=lambda *_: RecordBatch((fresh,)),
+                                      runtime_factory=Runtime)
+            store.queue_scan(source_key(SCOPE), SCOPE, 24)
+            queries, connect = [], store.connect
+
+            @contextmanager
+            def traced_connect():
+                with connect() as db:
+                    db.set_trace_callback(queries.append)
+                    yield db
+
+            with patch.object(store, 'connect', traced_connect):
+                result = asyncio.run(worker.extract(store.claim_scan(), Event()))
+            reads = [q for q in queries if q.startswith('SELECT ') and 'FROM item_evidence' in q]
+            self.assertEqual(len(reads), 2)  # One task batch and the already-loaded event batch.
+            self.assertEqual(result['updated_task_ids'], [first['id']])
+            self.assertEqual(result['updated_event_ids'], [event['id']])
+            prompt = prompts[0]
+            self.assertEqual(prompt['records'], [asdict(shared), asdict(detail), asdict(fresh)])
+            self.assertEqual(prompt['related_records'], [])
+            self.assertEqual(prompt['new_record_ids'], ['3'])
+            self.assertTrue(all(t['original_record_refs'] == ['records[0]']
+                                for t in prompt['existing_tasks']))
+            self.assertEqual(prompt['existing_events'][0]['original_record_refs'], ['records[0]', 'records[1]'])
+            self.assertTrue(all('original_records' not in item
+                                for item in prompt['existing_tasks'] + prompt['existing_events']))
+            self.assertEqual(store.event(event['id'])['title'], changed_event['title'])
+            self.assertEqual({r['id'] for r in store.evidence('task', first['id'])}, {'1', '3'})
+
+    def test_context_refs_separate_chats_and_versions_with_the_same_record_id(self):
+        with TemporaryDirectory() as directory:
+            store = TaskStore(Path(directory)/'assistant.db')
+            saved = record(1, '旧的付款说明')
+            fresh = replace(saved, text='更新后的付款说明', content_hash='edited-version')
+            foreign = replace(saved, stream_id='other-chat')
+            current = store.create(description='本会话事项', scope=dict(SCOPE,
+                origin=dict(records=[asdict(saved)])))
+            for title in ('另一个会话事项一', '另一个会话事项二'):
+                store.create(description=title, scope=dict(SCOPE, chat_id='other-chat',
+                    origin=dict(records=[asdict(foreign)])))
+            excluded = store.create(description='另一账号事项', scope=dict(SCOPE,
+                history_account='other-account', origin=dict(records=[asdict(saved)])))
+            prompts = []
+
+            class Runtime:
+                async def create_thread(self):
+                    pass
+
+                async def run_turn(self, prompt, **kwargs):
+                    prompts.append(json.loads(prompt))
+                    return SimpleNamespace(status='completed', final_message=json.dumps(
+                        output(task(1, task_id=current['id']))))
+
+                async def close(self):
+                    pass
+
+            worker = ExtractionWorker(store, source_loader=lambda *_: RecordBatch((fresh,)),
+                                      runtime_factory=Runtime)
+            store.queue_scan(source_key(SCOPE), SCOPE, 24)
+            result = asyncio.run(worker.extract(store.claim_scan(), Event()))
+            self.assertEqual(result['updated_task_ids'], [current['id']])
+            prompt = prompts[0]
+            self.assertEqual(prompt['records'], [asdict(fresh)])
+            self.assertEqual(prompt['related_records'], [asdict(saved), asdict(foreign)])
+            snapshots = {t['id']: t for t in prompt['existing_tasks']}
+            self.assertNotIn(excluded['id'], snapshots)
+            self.assertEqual(snapshots[current['id']]['original_record_refs'], ['related_records[0]'])
+            self.assertTrue(all(t['original_record_refs'] == ['related_records[1]']
+                                for t in snapshots.values() if t['chat_id'] == 'other-chat'))
+            self.assertEqual(store.evidence('task', current['id']), [asdict(fresh)])
+
     def test_intent_is_independent_of_participation(self):
         records = [record(1, '先记下来，到时看看谁打脸'), record(2, '好，付款凭证我发给财务')]
         for intent in ('banter', 'hypothetical', 'uncertain'):
@@ -88,6 +197,7 @@ class ExtractionIntentTest(unittest.TestCase):
             self.assertEqual(prompts[0]['records'][0]['text'], original.text)
             self.assertEqual(len(prompts[0]['records']), 1)
             self.assertEqual([t['id'] for t in prompts[0]['existing_tasks']], [old['id']])
+            self.assertEqual(prompts[0]['existing_tasks'][0]['original_record_refs'], ['records[0]'])
             self.assertEqual([t['id'] for t in store.tasks()], [foreign['id']])
             self.assertEqual(store.get(old['id'])['notes'], '')
             self.assertEqual(store.scan_signature(source_key(SCOPE)), '{"preserved":"checkpoint"}')

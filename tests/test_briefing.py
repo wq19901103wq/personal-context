@@ -1,5 +1,6 @@
 """Briefing contents and durable delivery; never contacts a live messaging service."""
 
+from contextlib import contextmanager
 from datetime import datetime
 from http.client import HTTPConnection
 import json
@@ -8,7 +9,7 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from personal_assistant.briefing import Briefings, bounds
@@ -141,6 +142,59 @@ class BriefingTest(unittest.TestCase):
         self.briefings.sync(at(10, day=8))
         self.assertEqual(self.claim(at(10, day=8))['kind'], 'daily')
 
+    def test_unchanged_ticks_do_not_rebuild_or_write_even_after_unrelated_edits(self):
+        task = self.task(due_at=at(18))
+        self.event(starts_at=at(14), ends_at=at(15), recurrence=dict(frequency='daily'))
+        self.briefings.sync(at(9))
+        self.store.update(task['id'], dict(notes='备注', wake_at=at(19)))
+        connect = self.store.connect
+        writes = []
+
+        @contextmanager
+        def tracked_connect():
+            with connect() as db:
+                yield db
+                writes.append(db.total_changes)
+
+        with patch.object(self.store, 'connect', tracked_connect), \
+                patch.object(self.briefings, 'daily', wraps=self.briefings.daily) as daily:
+            self.briefings.sync(at(9, 1))
+            self.briefings.sync(at(9, 2))
+            daily.assert_not_called()
+            Briefings(self.store).sync(at(9, 3))
+        self.assertEqual(sum(writes), 0)
+
+    def test_cached_daily_refreshes_when_overdue_state_or_local_day_changes(self):
+        self.task(due_at=at(10))
+        self.event(starts_at=at(14), ends_at=at(15), recurrence=dict(frequency='daily'))
+        self.briefings.sync(at(9))
+        with self.store.connect() as db:
+            item_id = db.execute("SELECT id FROM briefing_deliveries WHERE kind='daily'").fetchone()[0]
+        self.briefings.sync(at(10))
+        self.assertNotIn('已逾期', self.row(item_id)['body'])
+        self.briefings.sync(at(10) + 1)
+        self.assertIn('已逾期', self.row(item_id)['body'])
+        self.briefings.sync(at(9))
+        self.assertNotIn('已逾期', self.row(item_id)['body'])
+        self.briefings.sync(at(9, day=8))
+        self.assertEqual(self.row(item_id)['status'], 'expired')
+        with self.store.connect() as db:
+            row = db.execute("SELECT day,body FROM briefing_deliveries WHERE status='pending'").fetchone()
+        self.assertEqual(row['day'], '2026-11-08')
+        self.assertIn('11-08 14:00', row['body'])
+
+    def test_cached_daily_refreshes_when_timezone_changes_within_same_date(self):
+        self.event(starts_at=at(0, 30, day=8), ends_at=at(1, day=8))
+        self.briefings.sync(at(9))
+        with self.store.connect() as db:
+            item_id = db.execute("SELECT id FROM briefing_deliveries WHERE kind='daily'").fetchone()[0]
+        self.assertNotIn('会面', self.row(item_id)['body'])
+        settings = self.store.settings()
+        self.store.set_settings(dict(settings, timezone='UTC'))
+        self.briefings.sync(at(9, 1))
+        self.assertEqual(self.row(item_id)['day'], '2026-11-07')
+        self.assertIn('会面', self.row(item_id)['body'])
+
     def test_delivery_respects_busy_buffers_quiet_hours_and_cooldown(self):
         self.event(starts_at=at(11), ends_at=at(12))
         self.briefings.sync(at(9))
@@ -211,13 +265,13 @@ class BriefingTest(unittest.TestCase):
         task = self.task()
         self.briefings.sync(at(9, 1))
         self.assertTrue(self.briefings.view(at(9, 1))['pending'])
-        self.briefings.configure(dict(daily_enabled=False, changes_enabled=False))
+        Briefings(self.store).configure(dict(daily_enabled=False, changes_enabled=False))
         self.store.update(task['id'], dict(due_at=at(17)))
-        self.briefings.configure(dict(changes_enabled=True))
+        Briefings(self.store).configure(dict(changes_enabled=True))
         self.briefings.sync(at(10))
         self.assertEqual(self.briefings.view(at(10))['pending'], [])
         self.assertIsNone(self.claim(at(10)))
-        self.briefings.configure(dict(daily_enabled=True))
+        Briefings(self.store).configure(dict(daily_enabled=True))
         self.briefings.sync(at(10, 1))
         self.assertEqual(self.claim(at(10, 1))['kind'], 'daily')
 

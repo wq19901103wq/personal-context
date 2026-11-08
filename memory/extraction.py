@@ -48,7 +48,10 @@ involvement.state=confirmed 仅用于原文能确定本人角色的事项，self
 evidence_record_ids 引用能说明该角色的上下文；他人事项用 other，角色不清用 uncertain。
 例如讨论面试，应区分应聘者、面试官、介绍人和提供建议的人；不知道时不猜角色。
 existing_tasks / existing_events 中 deleted=true 的事项不覆盖、不恢复，也不换标题或锚点重建。
-original_records 是已有事项的原始上下文，不是办事意图的证明；不能因曾经入库就认可原判断。
+original_record_refs 指向原文在 records / related_records 中的位置（从0开始，如 records[0]）。
+结合这些引用读取已有事项的原始上下文；原文不是办事意图的证明，不能因曾经入库就认可原判断。
+records 是本会话可引用资料；related_records 仅供理解已有事项的其他会话或旧版本上下文，
+不能把 related_records 的消息编号用作本轮 anchor_record_id / evidence_record_ids。
 同会话已有自动提取事项经完整原文确认属于调侃、假设、他人事务或误判时，输出原 id 和正确 intent，
 不需要本人继续处理则 involvement.state=other。系统会撤下误提取；不要伪装成真实任务的取消。
 原文不足时不撤下已有事项。用户手动创建的事项不属于本轮纠错范围。
@@ -119,7 +122,7 @@ title/body 简洁，reason 说明匹配依据，不在推送中复述具体住�
 summary 简述发现或未发现的原因，不输出内部推理、本机路径。
 
 若 review_existing=true，本轮只重新分类已有自动提取，不执行新增或日常状态更新。
-逐项结合 original_records 判断是否真的有本人需要履行的现实安排；
+逐项结合 original_record_refs 指向的原文判断是否真的有本人需要履行的现实安排；
 已有 status（包括 cancelled）只是历史状态，不证明提取正确，也不能因此跳过误项。
 确认属于玩笑、假设或他人事务的，必须在 tasks/events 输出原 id 和正确 intent/involvement；
 summary 不能替代这些结构化结果，notes 保持空字符串。
@@ -254,15 +257,43 @@ class ExtractionWorker:
                     t['updated_at']), reverse=True)[:120]
             known = relevant(self.store.tasks(include_deleted=True))
             known_events = relevant(self.store.events(include_deleted=True))
+            task_evidence = self.store.evidence_for('task', (t['id'] for t in known))
+            evidence_by_item = {}
             originals = {}
+            for kind, items in (('task', known), ('event', known_events)):
+                for item in items:
+                    refs = (task_evidence.get(item['id'], []) if kind == 'task' else item['evidence'])
+                    refs = refs or item['scope'].get('origin', {}).get('records', [])
+                    evidence_by_item[kind, item['id']] = refs
+                    if item['scope'].get('chat_id') == scope['chat_id']:
+                        originals.update({r['id']: r for r in refs})
+            # Saved originals can have fallen outside the rolling source window.
+            if review:
+                records = ()
+            present = {r.id for r in records}
+            records = tuple(records) + tuple(RawRecord(
+                **dict(r, source=SourceBinding(**r['source']), actor=SenderEvidence(**r['actor']),
+                       time=MessageTime(**r['time']))) for rid, r in originals.items() if rid not in present)
+            records = tuple(sorted(records, key=lambda r: r.time.sent_at or r.time.recorded_at))
+            prompt_records = [asdict(r) for r in records]
+
+            def record_key(record):
+                return (record['source']['source_id'], record['source']['account_id'],
+                        record['stream_id'], record['id'], record['content_hash'])
+
+            locations = {record_key(r): f'records[{index}]' for index, r in enumerate(prompt_records)}
+            related_records = []
             def snapshot(item, keys, kind):
-                refs = (self.store.evidence(kind, item['id']) or
-                        item['scope'].get('origin', {}).get('records', []))
-                if item['scope'].get('chat_id') == scope['chat_id']:
-                    originals.update({r['id']: r for r in refs})
+                refs = []
+                for record in evidence_by_item[kind, item['id']]:
+                    key = record_key(record)
+                    if key not in locations:
+                        locations[key] = f'related_records[{len(related_records)}]'
+                        related_records.append(record)
+                    refs.append(locations[key])
                 return dict({key: item[key] for key in keys}, chat_id=item['scope'].get('chat_id'),
                             involvement=item['scope'].get('involvement'),
-                            deleted=item['deleted_at'] is not None, original_records=refs)
+                            deleted=item['deleted_at'] is not None, original_record_refs=list(dict.fromkeys(refs)))
             profiles = self.store.profiles(account_key=account_key(scope), include_dismissed=True)[:80]
             prompt = dict(source_kind=scope.get('source_kind', 'wechat'),
                 incremental_only=not review, review_existing=review,
@@ -277,16 +308,7 @@ class ExtractionWorker:
                         'field', 'value', 'confidence', 'status', 'observed_at', 'valid_from', 'valid_until', 'temporal_kind')},
                     subject=dict(actor=p['evidence'][0]['actor'],
                                  stream_id=p['evidence'][0]['stream_id'])) for p in profiles],
-                new_record_ids=new_ids, records=[asdict(r) for r in records])
-            # Saved originals can have fallen outside the rolling source window.
-            if review:
-                records = ()
-            present = {r.id for r in records}
-            records = tuple(records) + tuple(RawRecord(
-                **dict(r, source=SourceBinding(**r['source']), actor=SenderEvidence(**r['actor']),
-                       time=MessageTime(**r['time']))) for rid, r in originals.items() if rid not in present)
-            records = tuple(sorted(records, key=lambda r: r.time.sent_at or r.time.recorded_at))
-            prompt['records'] = [asdict(r) for r in records]
+                new_record_ids=new_ids, records=prompt_records, related_records=related_records)
             output = await self.infer(prompt, stop)
             tasks, events, facts, insights = self.candidates(scope, records, output, profiles, new_ids,
                                                            known, known_events)
