@@ -2,7 +2,7 @@
 
 function renderBriefings(){
   const value=state.briefings;if(!value)return;
-  const {config,today,pending,history}=value;
+  const {config,today,pending,history,delivery_notes:notes={}}=value;
   $('briefing-updated').textContent=today.day+' · 按当前保存的安排更新';
   const todayBox=$('briefing-today');todayBox.replaceChildren();
   function appendItem(box,item){
@@ -22,7 +22,8 @@ function renderBriefings(){
   if(pending.length){changes.append(element('h3','待合并的变化'));for(const item of pending)appendItem(changes,item);}
   const statuses={pending:'等待合适时段',sending:'正在推送',delivered:'微信接口已接受',retry:'等待重试',unknown:'结果未知，请查看微信',failed:'推送失败',expired:'当天未发送，已过期',disabled:'推送已暂停',superseded:'变化已撤销'};
   const latest=history.find(v=>v.kind==='daily'&&v.day===today.day);
-  if(latest)todayBox.append(element('p','今日微信简报：'+(statuses[latest.status]||latest.status),'muted'));
+  if(notes.daily||latest)todayBox.append(element('p','今日微信简报：'+(notes.daily||statuses[latest.status]||latest.status),'muted'));
+  if(notes.changes)changes.append(element('p','变化提醒：'+notes.changes,'muted'));
   const recent=history.filter(v=>v.kind==='changes'&&!['superseded','expired'].includes(v.status));
   if(recent.length){
     const item=recent[0];changes.append(element('h3','最近一次变化'),element('p',stamp(item.sent_at||item.created_at)+' · '+(statuses[item.status]||item.status),'muted'),element('p',item.body,'briefing-text'));

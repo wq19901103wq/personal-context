@@ -43,12 +43,14 @@ def serve(app, *, port=8773, public_port=None, interval=30):
                                              inbox=app.store.inbox(),
                                              sources=app.store.settings(), last_tick=app.followup.last_tick,
                                              last_error=app.followup.last_error, notify=app.followup.notify,
+                                             last_delivery=app.followup.last_delivery,
+                                             delivery_error=app.followup.delivery_error,
                                              wechat_error=app.followup.wechat_error,
                                              scans=app.store.scans(), extraction_watch=app.store.scan_watch(),
                                              devices=app.devices.list(),
                                              insights=app.store.insights(),
                                              personalization=app.store.personalization(),
-                                             briefings=Briefings(app.store).view(),
+                                             briefings=Briefings(app.store).view(wechat=app.followup.wechat is not None),
                                              wechat=app.followup.wechat is not None))
                 if url.path == '/api/occurrences':
                     return self.respond(calendar_occurrences(app, url.query))

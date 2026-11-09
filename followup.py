@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from datetime import datetime
+from functools import partial
 import logging
 import threading
 import time
@@ -27,14 +28,20 @@ class FollowUp(PushDelivery):
         self.lock = threading.Lock()
         self.last_tick = None
         self.last_error = None
+        self.last_delivery = None
+        self.delivery_error = None
 
     def tick(self, *, now=None):
+        # One-shot CLI/API use still does both, even if a source check fails.
+        try:
+            return self.check(now=now)
+        finally:
+            self.deliver(now=now)
+
+    def check(self, *, now=None):
         now = time.time() if now is None else now
         with self.lock, self.store.worker_lock():
             self.calendar.sync(now=now)
-            if self.wechat:
-                self.store.recover_wechat()
-                self.receive_wechat(now)
             reminders, chat_cache = [], {}
             for task in self.store.tasks(active_only=True):
                 scope = task['scope']
@@ -81,17 +88,38 @@ class FollowUp(PushDelivery):
                     notify=self.notify, wechat=self.wechat)
                 if reminder_id is not None:
                     reminders.append(reminder_id)
-            if self.notify:
-                self.send_notifications(now)
-            self.briefings.sync(now)
-            if self.wechat:
-                self.send_reminders(now)
-                self.send_replies(now)
-                self.send_event_reminders(now)
-                self.send_insight(now)
-                self.send_briefing(now)
             self.last_tick, self.last_error = now, None
             return reminders
+
+    def deliver(self, *, now=None):
+        with self.store.delivery_lock() as acquired:
+            if not acquired:
+                return False
+            actions = []
+            if self.wechat:
+                self.store.recover_wechat()
+                actions.extend([
+                    ('微信收信', self.receive_wechat),
+                    ('日程提醒', partial(self.send_event_reminders, limit=1)),
+                    ('待办提醒', partial(self.send_reminders, limit=1)),
+                    ('指令回执', partial(self.send_replies, limit=1)),
+                ])
+            actions.append(('简报', self.send_briefing))
+            if self.wechat:
+                actions.append(('推荐', self.send_insight))
+            if self.notify:
+                actions.append(('本机通知', self.send_notifications))
+            errors = []
+            for name, action in actions:
+                try:
+                    # Don't use a timestamp from before a slow read or network request.
+                    action(time.time() if now is None else now)
+                except Exception as exc:
+                    errors.append(name + '：' + str(exc))
+                    log.exception('%s本轮失败，其他推送继续', name)
+            self.last_delivery = time.time() if now is None else now
+            self.delivery_error = '\n'.join(errors) or None
+            return True
 
     def receive_wechat(self, now):
         try:
@@ -119,12 +147,29 @@ class FollowUp(PushDelivery):
             parts.append('部分来源暂时无法读取；提醒已保留，可以查看具体错误。')
         return '\n'.join(parts)
 
-    def run(self, stop, *, interval=30):
+    def run_checks(self, stop, *, interval):
         while not stop.is_set():
             try:
-                self.tick()
+                self.check()
             except Exception as exc:
                 # Keep future reminders alive and make an unexpected tick failure visible.
                 self.last_error = str(exc)
                 log.exception('本轮跟进失败')
             stop.wait(interval)
+
+    def run(self, stop, *, interval=30):
+        checker = threading.Thread(target=self.run_checks, args=(stop,),
+            kwargs=dict(interval=interval), name='follow-up-checks', daemon=True)
+        checker.start()
+        try:
+            while not stop.is_set():
+                started = time.monotonic()
+                try:
+                    self.deliver()
+                except Exception as exc:
+                    self.delivery_error = str(exc)
+                    log.exception('推送本轮失败，稍后重试')
+                stop.wait(max(0, min(interval, 5) - (time.monotonic() - started)))
+        finally:
+            stop.set()
+            checker.join(timeout=15)

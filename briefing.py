@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from memory.personalization import next_recommendation_time
 from common.recurrence import occurrences, interval, unresolved
+from personal_context.wechat_push import SESSION_ERRORS
 
 
 EVENT_FIELDS = ('id', 'title', 'status', 'starts_at', 'ends_at', 'all_day', 'timezone',
@@ -217,22 +218,35 @@ class Briefings:
             else:
                 db.execute("UPDATE briefing_deliveries SET status='disabled' WHERE kind='daily' AND status IN ('pending','retry')")
 
+    def waiting_reason(self, db, monitor, now, timezone):
+        """Use the same scheduling gate for delivery and its short page explanation."""
+        _, _, end = bounds(now, timezone)
+        events = [v for k, v in monitor['snapshot'].items() if k.startswith('event:')]
+        due = next_recommendation_time(events, now, end, timezone)
+        if due != now:
+            daytime = next_recommendation_time([], now, end, timezone)
+            if daytime is None:
+                return '已过今日推送时段（10:00–21:00），简报保留在这里'
+            if due is None:
+                return '今天没有避开日程及前后 30 分钟的推送空档，简报保留在这里'
+            if daytime > now:
+                return '未到推送时段（10:00–21:00），等待合适空档'
+            return '当前日程及前后 30 分钟内不推送，等待空档'
+        last = db.execute('SELECT MAX(sent_at) FROM briefing_deliveries').fetchone()[0]
+        if last is not None and now - last < 1800:
+            return '距上次简报或变化推送不足 30 分钟，稍后再发'
+        return None
+
     def claim(self, now):
         timezone = self.store.settings()['timezone']
-        day, _, end = bounds(now, timezone)
+        day = bounds(now, timezone)[0]
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            # The caller owns worker_lock. A previous sender cannot still be running.
-            db.execute("UPDATE briefing_deliveries SET status='unknown',error='发送时服务中断，请查看微信；不会自动重发' WHERE status='sending'")
             config = self.config_in(db)
             monitor = self.read_setting(db, 'briefing_monitor', None)
             if not monitor:
                 return None
-            events = [v for k, v in monitor['snapshot'].items() if k.startswith('event:')]
-            if next_recommendation_time(events, now, end, timezone) != now:
-                return None
-            last = db.execute('SELECT MAX(sent_at) FROM briefing_deliveries').fetchone()[0]
-            if last is not None and now - last < 1800:
+            if self.waiting_reason(db, monitor, now, timezone):
                 return None
             row = db.execute("SELECT * FROM briefing_deliveries WHERE status IN ('pending','retry') AND retry_at<=? AND (kind='changes' OR day=?) ORDER BY id LIMIT 1", (now, day)).fetchone()
             if row and not config[row['kind'] + '_enabled']:
@@ -278,12 +292,44 @@ class Briefings:
             db.execute("UPDATE briefing_deliveries SET status=CASE WHEN ?='retry' AND attempts>=3 THEN 'failed' ELSE ? END,error=?,retry_at=?,sent_at=CASE WHEN ?='retry' THEN NULL ELSE sent_at END WHERE id=? AND status='sending'",
                        (status, status, error, now + 60, status, item_id))
 
-    def view(self, now=None):
+    def view(self, now=None, *, wechat=True):
         now = time.time() if now is None else now
         timezone = self.store.settings()['timezone']
         with self.store.connect() as db:
             config, snapshot = self.config_in(db), self.snapshot_in(db)
             monitor = self.read_setting(db, 'briefing_monitor', {})
             history = [dict(row) for row in db.execute('SELECT id,kind,day,title,body,status,error,created_at,sent_at FROM briefing_deliveries ORDER BY id DESC LIMIT 20')]
+            day = bounds(now, timezone)[0]
+            waiting = self.waiting_reason(db, monitor or dict(snapshot=snapshot), now, timezone)
+
+        def note(kind):
+            if not config[kind + '_enabled']:
+                return '推送已暂停，内容保留在这里'
+            item = next((v for v in history if v['kind'] == kind and
+                         (kind != 'daily' or v['day'] == day)), None)
+            if kind == 'changes' and monitor.get('pending') and (
+                    not item or item['status'] not in ('pending', 'retry', 'sending')):
+                item = None
+            elif kind == 'changes' and not item:
+                return None
+            status = item['status'] if item else 'pending'
+            if status in ('delivered', 'sending', 'expired', 'superseded'):
+                return None
+            if not wechat:
+                return '当前未连接微信，内容保留在这里'
+            error = item.get('error') if item else None
+            if status in ('retry', 'failed') and error in SESSION_ERRORS:
+                return error.replace('后重试', '后会自动恢复')
+            if status in ('retry', 'failed', 'unknown'):
+                return error or {'retry': '推送未完成，等待重试',
+                                 'failed': '推送失败，内容保留在这里',
+                                 'unknown': '发送结果未知，请查看微信；不会自动重发'}[status]
+            if waiting:
+                return waiting
+            if kind == 'changes' and now - monitor.get('changed_at', now) < 120:
+                return '正在合并变化，连续 2 分钟稳定后推送'
+            return '等待下一轮推送'
+
         return dict(config=config, today=self.daily(snapshot, now, timezone),
-                    pending=change_items(monitor.get('pending', {}), now), history=history)
+                    pending=change_items(monitor.get('pending', {}), now), history=history,
+                    delivery_notes=dict(daily=note('daily'), changes=note('changes')))

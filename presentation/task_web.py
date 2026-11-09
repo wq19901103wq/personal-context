@@ -65,10 +65,10 @@ def calendar_view(app, *, wechat=False):
                   detail_path='/task/' + app.store.task_token(task['id']))
              for task in app.store.tasks()]
     insights = [dict({k: item[k] for k in ('id', 'title', 'body', 'reason', 'url', 'kind',
-                    'created_at', 'read_at', 'notification_status', 'expires_at', 'discovery', 'feedback', 'not_before')},
+                    'created_at', 'read_at', 'notification_status', 'notification_error', 'expires_at', 'discovery', 'feedback', 'not_before')},
                     evidence=[], profile_ids=[]) for item in app.store.insights()]
     return dict(tasks=tasks, events=[event_view(e) for e in app.store.events()], insights=insights,
-                briefings=Briefings(app.store).view(), calendar_import=calendar_import_view(app.store),
+                briefings=Briefings(app.store).view(wechat=wechat), calendar_import=calendar_import_view(app.store),
                 wechat=wechat,
                 personalization=app.store.personalization(),
                 sources=dict(timezone=app.store.settings()['timezone']))

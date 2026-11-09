@@ -40,8 +40,8 @@ class PushDelivery:
                 log.warning('本机通知 #%s 失败：%s', item['id'], error)
             self.store.notification_result(item['id'], error=error, now=now)
 
-    def send_reminders(self, now):
-        for _ in range(10):
+    def send_reminders(self, now, *, limit=10):
+        for _ in range(limit):
             item = self.store.claim_wechat(now)
             if item is None:
                 break
@@ -68,23 +68,26 @@ class PushDelivery:
         return self.public_url + '/task/' + self.store.task_token(task_id)
 
     def send_briefing(self, now):
+        self.briefings.sync(now)
+        if not self.wechat:
+            return
         item = self.briefings.claim(now)
         if not item:
             return
-        sections = json.loads(item['items_json'])
-        if item['kind'] == 'daily':
-            body = '\n\n'.join(s['title'] + f"（{len(s['items'])} 条）\n" +
-                ('\n'.join('• ' + i['text'] for i in s['items'][:3]) or '暂无记录') +
-                ('\n其余安排请查看完整简报。' if len(s['items']) > 3 else '') for s in sections)
-        else:
-            changes = change_items(sections, now)
-            body = f'共 {len(changes)} 项变化\n\n' + '\n\n'.join(i['text'] for i in changes[:5])
-            if len(changes) > 5:
-                body += '\n其余变化请查看完整简报。'
-        text = '个人助理 · ' + item['title'] + '\n\n' + body
-        if self.public_url:
-            text += '\n\n查看完整简报与调整安排：' + self.public_url + '/calendar/' + self.store.calendar_token()
         try:
+            sections = json.loads(item['items_json'])
+            if item['kind'] == 'daily':
+                body = '\n\n'.join(s['title'] + f"（{len(s['items'])} 条）\n" +
+                    ('\n'.join('• ' + i['text'] for i in s['items'][:3]) or '暂无记录') +
+                    ('\n其余安排请查看完整简报。' if len(s['items']) > 3 else '') for s in sections)
+            else:
+                changes = change_items(sections, now)
+                body = f'共 {len(changes)} 项变化\n\n' + '\n\n'.join(i['text'] for i in changes[:5])
+                if len(changes) > 5:
+                    body += '\n其余变化请查看完整简报。'
+            text = '个人助理 · ' + item['title'] + '\n\n' + body
+            if self.public_url:
+                text += '\n\n查看完整简报与调整安排：' + self.public_url + '/calendar/' + self.store.calendar_token()
             self.wechat.send(text, client_id=item['client_id'],
                              recipient_id=item['recipient_id'], bot_id=item['bot_id'])
         except PushError as exc:
@@ -94,21 +97,21 @@ class PushDelivery:
         else:
             self.briefings.result(item['id'], 'delivered', now)
 
-    def send_event_reminders(self, now):
+    def send_event_reminders(self, now, *, limit=10):
         self.store.queue_event_reminders(self.wechat, now)
-        for _ in range(10):
+        for _ in range(limit):
             item = self.store.claim_event_reminder(now)
             if item is None:
                 break
-            start = datetime.fromtimestamp(item['starts_at'], ZoneInfo(item['timezone']))
-            remaining = max(1, int((item['starts_at'] - now + 59) // 60))
-            text = (f"个人助理 · 日程提醒\n{item['title']}\n"
-                    f"{remaining} 分钟后开始\n开始：{start:%Y-%m-%d %H:%M}（{item['timezone']}）")
-            if item['location']:
-                text += '\n地点：' + item['location']
-            if self.public_url:
-                text += '\n\n查看与调整：' + self.public_url + '/calendar/' + self.store.calendar_token()
             try:
+                start = datetime.fromtimestamp(item['starts_at'], ZoneInfo(item['timezone']))
+                remaining = max(1, int((item['starts_at'] - now + 59) // 60))
+                text = (f"个人助理 · 日程提醒\n{item['title']}\n"
+                        f"{remaining} 分钟后开始\n开始：{start:%Y-%m-%d %H:%M}（{item['timezone']}）")
+                if item['location']:
+                    text += '\n地点：' + item['location']
+                if self.public_url:
+                    text += '\n\n查看与调整：' + self.public_url + '/calendar/' + self.store.calendar_token()
                 message_id = self.wechat.send(text, client_id=item['client_id'],
                     recipient_id=item['recipient_id'], bot_id=item['bot_id'])
             except PushError as exc:
@@ -127,12 +130,12 @@ class PushDelivery:
         item = self.store.claim_insight(now, respect_schedule=not requested)
         if not item:
             return
-        text = f"个人助理 · 为你发现\n{item['title']}\n\n{item['body']}\n\n为什么推荐：{item['reason']}"
-        if item.get('url'):
-            text += '\n\n查看详情：' + item['url']
-        if self.public_url:
-            text += '\n\n查看推荐与日程：' + self.public_url + '/calendar/' + self.store.calendar_token()
         try:
+            text = f"个人助理 · 为你发现\n{item['title']}\n\n{item['body']}\n\n为什么推荐：{item['reason']}"
+            if item.get('url'):
+                text += '\n\n查看详情：' + item['url']
+            if self.public_url:
+                text += '\n\n查看推荐与日程：' + self.public_url + '/calendar/' + self.store.calendar_token()
             self.wechat.send(text, client_id=item['client_id'],
                              recipient_id=item['recipient_id'], bot_id=item['bot_id'])
         except PushError as exc:
@@ -142,8 +145,8 @@ class PushDelivery:
         else:
             self.store.insight_result(item['id'], status='delivered', now=now)
 
-    def send_replies(self, now):
-        for _ in range(10):
+    def send_replies(self, now, *, limit=10):
+        for _ in range(limit):
             item = self.store.claim_wechat_reply(now)
             if item is None:
                 break

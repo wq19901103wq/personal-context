@@ -16,7 +16,7 @@ from personal_assistant.briefing import Briefings, bounds
 from personal_assistant.followup import FollowUp
 from personal_assistant.store import TaskStore
 from personal_assistant.task_web import calendar_view, task_server
-from personal_context.wechat_push import PushError
+from personal_context.wechat_push import PushError, SESSION_EXPIRED
 
 
 def at(hour, minute=0, day=7):
@@ -218,8 +218,55 @@ class BriefingTest(unittest.TestCase):
         item = self.claim(at(10))
         self.briefings = Briefings(TaskStore(self.store.path), wechat=self.wechat)
         self.briefings.sync(at(11))
+        with self.store.delivery_lock() as acquired:
+            self.assertTrue(acquired)
+            self.store.recover_wechat()
         self.assertIsNone(self.claim(at(11)))
         self.assertEqual(self.row(item['id'])['status'], 'unknown')
+
+    def test_page_explains_the_same_quiet_hours_and_busy_gates_as_delivery(self):
+        self.event(starts_at=at(11), ends_at=at(12))
+        self.briefings.sync(at(9))
+        for now, reason in ((at(9), '未到推送时段'), (at(10, 30), '当前日程'),
+                            (at(21), '已过今日推送时段')):
+            with self.subTest(reason=reason):
+                self.assertIn(reason, self.briefings.view(now)['delivery_notes']['daily'])
+                self.assertIsNone(self.claim(now))
+        self.assertIsNotNone(self.claim(at(12, 30)))
+
+    def test_page_distinguishes_no_free_slot_session_failure_and_accepted_send(self):
+        event = self.event(starts_at=at(10), ends_at=at(22))
+        self.briefings.sync(at(10))
+        self.assertIn('没有避开日程', self.briefings.view(at(10))['delivery_notes']['daily'])
+        self.assertIsNone(self.claim(at(10)))
+        self.store.update_event(event['id'], dict(status='cancelled'))
+        self.briefings.sync(at(10))
+        item = self.claim(at(10))
+        self.briefings.result(item['id'], 'retry', at(10), SESSION_EXPIRED)
+        note = self.briefings.view(at(10))['delivery_notes']['daily']
+        self.assertIn('会话已过期', note)
+        self.assertIn('ClawBot 发一条消息后会自动恢复', note)
+        self.assertIn('未连接微信', self.briefings.view(at(10), wechat=False)['delivery_notes']['daily'])
+        retry = self.claim(at(10, 1))
+        self.briefings.result(retry['id'], 'delivered', at(10, 1))
+        self.assertIsNone(self.briefings.view(at(10, 1))['delivery_notes']['daily'])
+        self.assertEqual(self.briefings.view(at(10, 1))['history'][0]['status'], 'delivered')
+
+    def test_page_explains_change_coalescing_cooldown_and_pause(self):
+        self.briefings.sync(at(10))
+        item = self.claim(at(10))
+        self.briefings.result(item['id'], 'delivered', at(10))
+        self.task()
+        self.briefings.sync(at(10, 1))
+        self.assertIn('不足 30 分钟', self.briefings.view(at(10, 2))['delivery_notes']['changes'])
+        self.task()
+        self.briefings.sync(at(10, 31))
+        self.assertIn('正在合并变化', self.briefings.view(at(10, 31))['delivery_notes']['changes'])
+        self.assertIsNone(self.claim(at(10, 31)))
+        self.assertIsNotNone(self.claim(at(10, 33)))
+        self.briefings.configure(dict(daily_enabled=False, changes_enabled=False))
+        notes = self.briefings.view(at(10, 34))['delivery_notes']
+        self.assertTrue(all('已暂停' in note for note in notes.values()))
 
     def test_retry_refreshes_changes_keeps_client_and_original_recipient(self):
         self.changes_only()

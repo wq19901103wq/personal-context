@@ -316,6 +316,17 @@ class TaskStore:
             fcntl.flock(handle, fcntl.LOCK_EX)
             yield
 
+    @contextmanager
+    def delivery_lock(self):
+        # Source reads may be slow. Only competing senders share this lock.
+        with self.path.with_suffix('.delivery.lock').open('a') as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+            else:
+                yield True
+
     def settings(self):
         with self.connect() as db:
             row = db.execute("SELECT value FROM settings WHERE key='sources'").fetchone()
@@ -777,9 +788,6 @@ class TaskStore:
     def claim_insight(self, now, *, respect_schedule=True):
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            # A stopped process must not blindly re-send a possibly delivered suggestion.
-            db.execute("UPDATE insights SET notification_status='unknown', "
-                       "notification_error='投递时服务中断，请查看微信' WHERE notification_status='sending'")
             self.expire_insights_in(db, now)
             sent = db.execute('SELECT COUNT(*),MAX(sent_at) FROM insights WHERE sent_at>?',
                               (now - 86400,)).fetchone()
@@ -1268,7 +1276,7 @@ class TaskStore:
                        "AND status IN ('pending', 'retry')", (reminder_id,))
 
     def recover_wechat(self):
-        # Called under worker_lock: no other sender can still own a 'sending' row.
+        # Called under delivery_lock: no other sender can still own a 'sending' row.
         with self.connect() as db:
             db.execute("UPDATE wechat_deliveries SET status='unknown', "
                        "error='上次发送中进程退出，请查看微信；不会自动重发' WHERE status='sending'")
@@ -1276,6 +1284,10 @@ class TaskStore:
                        "error='回执发送中断；指令已处理，不会重复执行' WHERE status='sending'")
             db.execute("UPDATE event_reminders SET status='unknown', "
                        "error='上次日程提醒发送中断，请查看微信；不会自动重发' WHERE status='sending'")
+            db.execute("UPDATE insights SET notification_status='unknown', "
+                       "notification_error='投递时服务中断，请查看微信' WHERE notification_status='sending'")
+            db.execute("UPDATE briefing_deliveries SET status='unknown', "
+                       "error='发送时服务中断，请查看微信；不会自动重发' WHERE status='sending'")
 
     def event_occurrences(self, start, end, *, include_uncertain=False):
         events = occurrences(self.events(), start, end, include_uncertain=include_uncertain)
