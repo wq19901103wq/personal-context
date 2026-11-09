@@ -82,8 +82,3 @@ def occurrences(events, start, end, *, include_uncertain=False):
                         occurrence_key=f"{event['id']}/{day.isoformat()}", uncertain=uncertain))
             day += timedelta(days=1)
     return result
-
-
-def is_busy(events, now):
-    return any(interval(e)[0] <= now < interval(e)[1] for e in
-               occurrences(events, now, now + 1, include_uncertain=True))

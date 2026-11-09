@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from threading import Event
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from personal_assistant.extraction import ExtractionWorker, INSTRUCTIONS, source_key
 from personal_assistant.execution import build_runtime
@@ -41,6 +41,47 @@ def output(*tasks, events=()):
 
 
 class ExtractionIntentTest(unittest.TestCase):
+    def test_invalid_candidates_do_not_discard_valid_items_or_repeat_inference(self):
+        with TemporaryDirectory() as directory:
+            store = TaskStore(Path(directory)/'assistant.db')
+            fresh = record(1, '明天下午我发送凭证，一起核对。我喜欢摄影。')
+            payload = output(
+                dict(task(1), evidence_record_ids=['missing']),
+                dict(task(1), task_id=999),
+                dict(task(1), due_action='set', due_text='下周一', due_at='2026-11-16'),
+                dict(task(1), due_action='set', due_text='明天下午', due_at='not-a-date'),
+                dict(task(1), due_action='set', due_text='明天下午', due_at=None),
+                task(1))
+            event = dict(event_id=None, title='一起核对', notes='', reason='', intent='action',
+                anchor_record_id='1', evidence_record_ids=['1'],
+                involvement=dict(state='confirmed', self_role='核对', evidence_record_ids=['1']),
+                time_action='keep', starts_at=None, ends_at=None, scheduled_date=None,
+                time_period='', all_day=False, location=None, time_text='', status=None)
+            payload['events'] = [dict(event, event_id=999),
+                dict(event, evidence_record_ids=['missing']),
+                dict(event, time_action='set', scheduled_date='not-a-date'), event]
+            fact = dict(subject_record_id='1', category='interest', field='interest', value='喜欢摄影',
+                confidence='explicit', evidence_record_ids=['1'], profile_id=None, operation='remember',
+                temporal_kind='durable', valid_from=None, valid_until=None, time_text='')
+            payload['profiles'] = [dict(fact, evidence_record_ids=['missing']),
+                dict(fact, valid_from='2026-11-10', time_text='下周一'), fact]
+            payload['insights'] = [dict(title='摄影展', body='', reason='', anchor_record_id='1',
+                evidence_record_ids=['1'], existing_profile_ids=[999], new_profile_indexes=[2])]
+            worker = ExtractionWorker(store, source_loader=lambda *_: RecordBatch((fresh,)))
+            worker.infer = AsyncMock(return_value=payload)
+
+            store.queue_scan(source_key(SCOPE), SCOPE, 24)
+            result = asyncio.run(worker.extract(store.claim_scan(), Event()))
+            self.assertEqual(len(result['created_task_ids']), 1)
+            self.assertEqual(len(result['created_event_ids']), 1)
+            self.assertEqual(len(result['profile_ids']), 1)
+            self.assertEqual(result['created_insight_ids'], [])
+            self.assertEqual(store.unprocessed_records(source_key(SCOPE), [fresh]), [])
+
+            store.queue_scan(source_key(SCOPE), SCOPE, 24)
+            asyncio.run(worker.extract(store.claim_scan(), Event()))
+            self.assertEqual(worker.infer.await_count, 1)
+
     def test_shared_originals_are_loaded_once_and_keep_task_event_updates(self):
         with TemporaryDirectory() as directory:
             store = TaskStore(Path(directory)/'assistant.db')

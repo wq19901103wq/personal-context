@@ -1,0 +1,17 @@
+<section class="panel questions" aria-labelledby="questions-heading">
+  <div class="panel-head"><div><h2 id="questions-heading">问问记忆</h2><p class="muted">从保存的聊天、记忆和安排中，找回你想知道的事。</p></div></div>
+  <div class="questions-content">
+    <div class="actions question-examples" aria-label="试着问">
+      <button type="button" class="small" data-question="我最近有哪些还没完成的约定？">还有什么约定没完成</button>
+      <button type="button" class="small" data-question="我这周有哪些安排？">这周有什么安排</button>
+      <button type="button" class="small" data-question="我有哪些饮食偏好？">我的饮食偏好</button>
+    </div>
+    <form id="question-form">
+      <div id="question-followup" class="muted" hidden><span></span> <button type="button" id="question-new" class="small quiet">改为新问题</button></div>
+      <label for="question-input">想找回什么</label>
+      <div class="question-compose"><textarea id="question-input" rows="2" maxlength="1000" required placeholder="例如：上次和小陈约好什么时候吃饭？"></textarea><button class="primary" id="question-submit" type="submit">提问</button></div>
+    </form>
+    <p id="question-error" class="error" role="alert"></p>
+    <div id="question-history" aria-live="polite"><p class="muted">还没有提问，点上面的例子试试。</p></div>
+  </div>
+</section>

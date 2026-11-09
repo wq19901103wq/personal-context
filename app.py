@@ -8,8 +8,9 @@ from zoneinfo import ZoneInfo
 
 from personal_context.wechat_push import WeChatPush
 from followup import FollowUp
-from inputs.wechat import SOURCE_ERRORS, history_reader, recent_messages, message_ids
+from inputs.wechat import SOURCE_ERRORS, history_reader, message_ids
 from memory.store import TaskStore
+from memory.qa import MemoryQuestions
 from execution import ExecutionWorker
 from memory.extraction import ExtractionWorker, enqueue
 from inputs.devices import DeviceInputs
@@ -27,6 +28,7 @@ class Assistant:
             public_url = public_url.rstrip('/')
         self.store = TaskStore(db_path)
         self.devices = DeviceInputs(self.store)
+        self.questions = MemoryQuestions(self.store)
         self.followup = FollowUp(self.store, notify=notify,
                                  wechat=WeChatPush(wechat_credentials) if wechat else None,
                                  public_url=public_url)
@@ -71,7 +73,7 @@ class Assistant:
                 chat = reader.get_chat(scope['chat_id'])
                 scope['history_source'] = chat.source.source_id
                 scope['chat_name'] = chat.display_name
-                observed = message_ids(recent_messages(scope))
+                observed = message_ids(reader.recent(scope['chat_id'], limit=30))
             except SOURCE_ERRORS as exc:
                 warnings.append(str(exc))
         task = self.store.create(**fields, timezone=sources['timezone'], scope=scope, observed=observed)
@@ -85,8 +87,6 @@ class Assistant:
             if not isinstance(data['deleted'], bool):
                 raise ValueError('删除状态须为布尔值')
             return self.store.set_deleted('task', task_id, data['deleted'])
-        if task['deleted_at'] is not None:
-            raise ValueError('待办已删除')
         if data.get('execution_action') == 'start':
             self.store.enqueue_execution(task_id, data.get('instruction', ''))
             return task
@@ -104,6 +104,8 @@ class Assistant:
 
     def update_event(self, event_id, data):
         event = self.store.event(event_id)
+        if event['scope'].get('source_kind') == 'apple_calendar':
+            raise ValueError('这是 Apple 日历导入的日程，请在 Apple 日历中修改或取消，助理会自动更新')
         if 'deleted' in data:
             if not isinstance(data['deleted'], bool):
                 raise ValueError('删除状态须为布尔值')

@@ -1,6 +1,7 @@
 """SQLite owns work state; the original history and knowledge stay in place."""
 
 from contextlib import contextmanager
+from datetime import datetime
 import fcntl
 import hashlib
 import json
@@ -12,8 +13,10 @@ import time
 import unicodedata
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from personal_context.memory import current_profile_sql, read_profiles, knowledge_signature
+from personal_context.wechat_push import SESSION_ERRORS
 from .personalization import next_recommendation_time
 from common.recurrence import occurrences
 
@@ -50,6 +53,12 @@ class TaskStore:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS memory_questions (
+                    id INTEGER PRIMARY KEY, question TEXT NOT NULL,
+                    parent_id INTEGER REFERENCES memory_questions(id),
+                    status TEXT NOT NULL DEFAULT 'queued', answer TEXT NOT NULL DEFAULT '',
+                    error TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY, description TEXT NOT NULL, notes TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'open', due_at REAL, wake_at REAL,
@@ -376,7 +385,8 @@ class TaskStore:
             rejected = self.rejected_recommendations_in(db)
             rejected_keys = {i['place_key'] for i in rejected}
             events = [self.event_row(r) for r in db.execute('SELECT * FROM calendar_events WHERE deleted_at IS NULL')]
-            timezone = self.settings()['timezone']
+            sources = db.execute("SELECT value FROM settings WHERE key='sources'").fetchone()
+            timezone = (json.loads(sources[0]) if sources else default_sources())['timezone']
             ids = []
             for item in output['items'][:2]:
                 url = recommendation_url(item['url'])
@@ -779,7 +789,8 @@ class TaskStore:
                               "AND retry_at<=? ORDER BY id", (now,)).fetchall()
             row = None
             events = [self.event_row(r) for r in db.execute('SELECT * FROM calendar_events WHERE deleted_at IS NULL')]
-            timezone = self.settings()['timezone']
+            sources = db.execute("SELECT value FROM settings WHERE key='sources'").fetchone()
+            timezone = (json.loads(sources[0]) if sources else default_sources())['timezone']
             for candidate in rows:
                 if respect_schedule:
                     if candidate['not_before'] > now:
@@ -905,7 +916,7 @@ class TaskStore:
         if 'recurrence' in changes:
             changes['recurrence_json'] = encode(changes.pop('recurrence'))
         changes = {key: value for key, value in changes.items() if key in {
-            'title', 'notes', 'starts_at', 'ends_at', 'all_day', 'location', 'time_text', 'status',
+            'title', 'notes', 'starts_at', 'ends_at', 'all_day', 'timezone', 'location', 'time_text', 'status',
             'scope_json', 'remind_before_minutes', 'scheduled_date', 'time_period', 'recurrence_json'}}
         changes['updated_at'] = now
         sql = ', '.join(f'{column}=?' for column in changes)
@@ -1125,13 +1136,17 @@ class TaskStore:
         key = 'wechat:' + wechat.bot_id + ':' + wechat.recipient_id
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            renewed = False
             for msg in result.get('msgs') or []:
                 if msg.get('message_type') != 1 or msg.get('from_user_id') != wechat.recipient_id:
                     continue
-                if msg.get('context_token'):
-                    state['context'] = msg['context_token']
                 if not msg.get('message_id') or msg.get('create_time_ms', 0) / 1000 < state['enabled_at']:
                     continue
+                received_at = msg.get('create_time_ms', 0) / 1000
+                if msg.get('context_token') and received_at > state.get('context_received_at', state['enabled_at']):
+                    state['context'] = msg['context_token']
+                    state['context_received_at'] = received_at
+                    renewed = True
                 identity = (wechat.bot_id, wechat.recipient_id, str(msg['message_id']))
                 if db.execute('SELECT 1 FROM wechat_commands WHERE bot_id=? AND recipient_id=? AND message_id=?',
                               identity).fetchone():
@@ -1144,9 +1159,33 @@ class TaskStore:
                            '(bot_id, recipient_id, message_id, task_id, command, reply, client_id, created_at, retry_at) '
                            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                            (*identity, task_id, command, reply, 'pa:reply:' + uuid4().hex, now, now))
+            if renewed:
+                self.resume_wechat_in(db, wechat, now=now)
             state['cursor'] = result.get('get_updates_buf', state['cursor'])
             db.execute('UPDATE settings SET value=? WHERE key=?', (encode(state), key))
         return state
+
+    def resume_wechat_in(self, db, wechat, *, now):
+        """A fresh self-message renews only deliveries rejected for lack of a session."""
+        target = (now, wechat.bot_id, wechat.recipient_id, *SESSION_ERRORS)
+        db.execute("UPDATE wechat_deliveries SET status='pending',attempts=0,error=NULL,retry_at=? "
+            "WHERE bot_id=? AND recipient_id=? AND error IN (?,?) AND status IN ('failed','retry') "
+            "AND reminder_id IN (SELECT r.id FROM reminders r JOIN tasks t ON t.id=r.task_id "
+            "WHERE r.read_at IS NULL AND t.deleted_at IS NULL AND t.status IN ('open','waiting'))", target)
+        db.execute("UPDATE event_reminders SET status='pending',attempts=0,error=NULL,retry_at=? "
+            "WHERE bot_id=? AND recipient_id=? AND error IN (?,?) AND status IN ('failed','retry') "
+            "AND starts_at>? AND event_id IN (SELECT id FROM calendar_events "
+            "WHERE status='confirmed' AND deleted_at IS NULL)", (*target, now))
+        db.execute("UPDATE insights SET notification_status='pending',notification_attempts=0,"
+            "notification_error=NULL,retry_at=? WHERE bot_id=? AND recipient_id=? "
+            "AND notification_error IN (?,?) AND notification_status IN ('failed','retry') "
+            "AND read_at IS NULL AND COALESCE(expires_at,created_at+86400)>?", (*target, now))
+        row = db.execute("SELECT value FROM settings WHERE key='sources'").fetchone()
+        timezone = (json.loads(row[0]) if row else default_sources())['timezone']
+        day = datetime.fromtimestamp(now, ZoneInfo(timezone)).date().isoformat()
+        db.execute("UPDATE briefing_deliveries SET status='pending',attempts=0,error=NULL,retry_at=? "
+            "WHERE bot_id=? AND recipient_id=? AND error IN (?,?) AND status IN ('failed','retry') "
+            "AND (kind='changes' OR day=?)", (*target, day))
 
     def claim_wechat_reply(self, now):
         with self.connect() as db:

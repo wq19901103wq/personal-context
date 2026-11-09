@@ -83,6 +83,19 @@ class MemoryTest(unittest.TestCase):
         self.assertEqual(self.store.tasks(), [])
         self.assertEqual(self.store.events(), [])
 
+    def test_automated_self_reply_cannot_create_replace_or_retract_a_profile(self):
+        bot = replace(record(2, '现在喜欢摄影', at=NOW+10), authorship='automated')
+        self.assertEqual(self.save(profile(2, '现在喜欢摄影'), records=[bot]), [])
+        pid = self.save(profile(1))[0]
+        for operation in ('remember', 'replace', 'retract'):
+            self.assertEqual(self.save(profile(2, '现在喜欢摄影', operation=operation,
+                profile_id=pid), records=[bot]), [])
+        self.assertEqual([p['value'] for p in self.store.profiles(now=NOW+20)], ['喜欢看展'])
+        # A separate personal confirmation can support a fact, even with bot context.
+        human = record(3, '对，我现在就是喜欢摄影', at=NOW+20)
+        self.assertTrue(self.save(profile(3, '现在喜欢摄影', evidence_record_ids=['2', '3']),
+                                  records=[bot, human]))
+
     def test_future_replacement_then_retraction_share_one_current_reader(self):
         pid = self.save(profile(1, '住在旧城区', category='address', field='residence_area'))[0]
         start = '2027-01-16T08:00:00+08:00'

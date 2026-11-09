@@ -93,12 +93,6 @@ class DeviceInputs:
                     json.loads(r['record_json'])['stream_id'].split(':', 1)[1])) for r in rows]
         return dict(scan_ids=ids)
 
-    def authorize(self, device_id, token):
-        with self.store.connect() as db:
-            row = db.execute('SELECT * FROM device_sources WHERE id=? AND enabled=1', (device_id,)).fetchone()
-        if not row or not hmac.compare_digest(row['token_hash'], token_hash(token)):
-            raise PermissionError('设备凭据不可用')
-
     def receive(self, device_id, token, data):
         event_id = text_field(data, 'event_id')
         text = text_field(data, 'text', limit=20000)

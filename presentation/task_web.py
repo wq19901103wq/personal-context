@@ -10,11 +10,14 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from inputs.devices import DeviceConflict
 from briefing import Briefings
+from memory.calendar import CalendarMemory
 
 
 TASK_FIELDS = ('id', 'description', 'notes', 'status', 'due_at', 'wake_at', 'timezone',
                'followup_seconds', 'created_at', 'updated_at', 'completed_at')
 ASSETS = {'base.css': 'text/css', 'calendar.css': 'text/css', 'calendar.js': 'text/javascript',
+          'connection.js': 'text/javascript',
+          'questions.js': 'text/javascript', 'questions.css': 'text/css',
           'recommendations.js': 'text/javascript', 'recommendations.css': 'text/css',
           'briefing.js': 'text/javascript', 'briefing.css': 'text/css',
           'devices.js': 'text/javascript', 'swipe.js': 'text/javascript'}
@@ -33,7 +36,10 @@ def event_view(event):
               'timezone', 'location', 'time_text', 'updated_at', 'remind_before_minutes',
               'scheduled_date', 'time_period', 'recurrence')
     reminder = event.get('reminder')
-    return dict({key: event[key] for key in fields},
+    source = event.get('scope', {})
+    imported = source.get('source_kind') == 'apple_calendar'
+    return dict({key: event[key] for key in fields}, read_only=imported,
+        source=dict(kind='apple_calendar', name=source.get('calendar_name', '')) if imported else None,
         **{key: event[key] for key in ('occurrence_key', 'uncertain') if key in event}, evidence=[
         dict(id=r['id'], stream_id=r['stream_id'], text=r['text'],
              actor=dict(display_name=r['actor'].get('display_name')),
@@ -62,10 +68,15 @@ def calendar_view(app, *, wechat=False):
                     'created_at', 'read_at', 'notification_status', 'expires_at', 'discovery', 'feedback', 'not_before')},
                     evidence=[], profile_ids=[]) for item in app.store.insights()]
     return dict(tasks=tasks, events=[event_view(e) for e in app.store.events()], insights=insights,
-                briefings=Briefings(app.store).view(),
+                briefings=Briefings(app.store).view(), calendar_import=calendar_import_view(app.store),
                 wechat=wechat,
                 personalization=app.store.personalization(),
                 sources=dict(timezone=app.store.settings()['timezone']))
+
+
+def calendar_import_view(store):
+    status = CalendarMemory(store).status()
+    return {key: status.get(key) for key in ('enabled', 'last_success_at', 'error')}
 
 
 def task_view(app, task):
@@ -108,6 +119,9 @@ def task_view(app, task):
 
 def task_handler(app):
     class Handler(BaseHTTPRequestHandler):
+        # Incomplete requests must not leave a connection thread waiting forever.
+        timeout = 20
+
         def respond(self, value, status=200, *, html=False, content_type=None):
             content_type = content_type or ('text/html' if html else 'application/json')
             body = (json.dumps(value, ensure_ascii=False) if content_type == 'application/json'
@@ -122,12 +136,18 @@ def task_handler(app):
             self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; "
                              "style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; "
                              "form-action 'none'; frame-ancestors 'none'")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                self.close_connection = True
+
+        def valid_origin(self):
+            origin = self.headers.get('Origin')
+            return not origin or urlparse(origin).netloc == self.headers.get('Host')
 
         def request_data(self):
-            origin = self.headers.get('Origin')
-            if origin and urlparse(origin).netloc != self.headers.get('Host'):
+            if not self.valid_origin():
                 self.respond(dict(error='请在助理页面中操作'), 403)
                 return None
             if self.headers.get_content_type() != 'application/json':
@@ -149,7 +169,6 @@ def task_handler(app):
                 if update and device:
                     authorization = self.headers.get('Authorization', '')
                     token = authorization[7:] if authorization.startswith('Bearer ') else ''
-                    app.devices.authorize(device[1], token)
                     data = self.request_data()
                     if data is None:
                         return
@@ -160,11 +179,13 @@ def task_handler(app):
                     if name in ASSETS:
                         return self.respond(Path(__file__).with_name(name).read_text(encoding='utf-8'),
                                             content_type=ASSETS[name])
-                calendar = re.fullmatch(r'/calendar/([A-Za-z0-9_-]{43})(/data|/occurrences|/personalization|/briefings|/insights/\d+/(?:read|dismiss)|/events(?:/\d+)?|/tasks/\d+)?', path)
+                calendar = re.fullmatch(r'/calendar/([A-Za-z0-9_-]{43})(/data|/questions(?:/\d+/retry)?|/occurrences|/personalization|/briefings|/insights/\d+/(?:read|dismiss)|/events(?:/\d+)?|/tasks/\d+)?', path)
                 if calendar:
                     app.store.authorize_calendar(calendar[1])
                     suffix = calendar[2]
                     if not update:
+                        if suffix == '/questions':
+                            return self.respond(app.questions.list())
                         if suffix is None:
                             return self.respond(render_page('mobile_calendar.html'), html=True)
                         if suffix == '/occurrences':
@@ -175,6 +196,10 @@ def task_handler(app):
                         data = self.request_data()
                         if data is None:
                             return
+                        if suffix == '/questions':
+                            return self.respond(app.questions.ask(data), 202)
+                        if re.fullmatch(r'/questions/\d+/retry', suffix):
+                            return self.respond(app.questions.retry(int(suffix.split('/')[2])), 202)
                         if suffix == '/personalization':
                             return self.respond(app.personalize(data))
                         if suffix == '/briefings':

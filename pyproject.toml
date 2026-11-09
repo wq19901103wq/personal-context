@@ -27,3 +27,4 @@ include = ["common*", "personal_context*", "inputs*", "memory*", "presentation*"
 
 [tool.setuptools.package-data]
 "presentation" = ["*.html", "*.js", "*.css"]
+"inputs" = ["*.swift", "*.plist"]

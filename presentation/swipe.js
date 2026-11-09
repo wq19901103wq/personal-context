@@ -14,6 +14,7 @@ async function deleteItem(item,kind){
   });
 }
 function swipeItem(content,item,kind){
+  if(item.read_only)return content;
   const wrapper=element('div',undefined,'swipe-item');
   wrapper.dataset.kind=kind;wrapper.dataset.id=item.id;
   const backdrop=element('div',item.recurrence?'删除整组':'删除','swipe-backdrop');backdrop.setAttribute('aria-hidden','true');
@@ -87,14 +88,18 @@ function openItemActions(item,kind){
   actionItem=item;actionKind=kind;chosenDate=null;pickerMonth=null;
   const task=kind==='task',closed=['done','cancelled'].includes(item.status),dialog=$('item-actions');
   const recurring=!task&&!!item.recurrence;
-  dialog.querySelector('.schedule-section').hidden=recurring;
+  const readOnly=!!item.read_only;
+  dialog.querySelector('.schedule-section').hidden=recurring||readOnly;
+  dialog.querySelector('.sheet-footer').hidden=readOnly;
+  $('action-source').hidden=!readOnly;
+  $('action-source').textContent=readOnly?'来自 Apple 日历 · '+(item.source?.name||'')+'。请在 Apple 日历中修改或取消，助理会自动更新。':'';
   $('action-edit').textContent=recurring?'编辑整组日程':'编辑文字与更多';
   $('action-delete').textContent=recurring?'删除整组':'删除';
   $('action-kind').textContent=task?'待办':recurring?'重复日程 · 整组操作':'日程';$('action-title').textContent=task?item.description:item.title;
   const when=task?(item.due_at==null?'未设截止时间':'截止 '+stamp(item.due_at,item.timezone)):
     (item.starts_at==null?(item.scheduled_date?item.scheduled_date+' · '+eventTime(item,item.scheduled_date):item.time_text||'时间待定'):dateKey(item.starts_at,item.timezone)+' · '+eventTime(item,dateKey(item.starts_at,item.timezone)));
   $('action-meta').textContent=[when,task?(item.status==='waiting'?'等待回复':''):item.location,recurring?recurrenceLabel(item):''].filter(Boolean).join(' · ');
-  $('action-primary').hidden=!task&&item.status==='confirmed';
+  $('action-primary').hidden=readOnly||(!task&&item.status==='confirmed');
   $('action-primary').textContent=task?(closed?'重新打开待办':'✓ 完成待办'):(item.status==='cancelled'?'恢复日程':'✓ 确认日程');
   $('action-primary').onclick=()=>runAction(async()=>{
     const data={status:task?(closed?'open':'done'):'confirmed'};

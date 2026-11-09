@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from urllib.parse import parse_qs, urlparse
 from briefing import Briefings
-from .task_web import render_page, task_handler, task_server, calendar_occurrences
+from .task_web import render_page, task_handler, task_server, calendar_occurrences, event_view, calendar_import_view
 
 
 def serve(app, *, port=8773, public_port=None, interval=30):
@@ -19,6 +19,11 @@ def serve(app, *, port=8773, public_port=None, interval=30):
                 self.respond(dict(error='仅限本机访问'), 403)
                 return False
             return True
+
+        def valid_origin(self):
+            origin = self.headers.get('Origin')
+            allowed = {f'http://127.0.0.1:{server.server_port}', f'http://localhost:{server.server_port}'}
+            return origin is None or origin in allowed
 
         def do_GET(self):
             try:
@@ -33,14 +38,15 @@ def serve(app, *, port=8773, public_port=None, interval=30):
                         task['detail_path'] = '/task/' + app.store.task_token(task['id'])
                     calendar_url = (app.followup.public_url + '/calendar/' + app.store.calendar_token()
                                     if app.followup.public_url else None)
-                    return self.respond(dict(tasks=tasks, events=app.store.events(), calendar_url=calendar_url,
+                    return self.respond(dict(tasks=tasks, events=[event_view(e) for e in app.store.events()], calendar_url=calendar_url,
+                                             calendar_import=calendar_import_view(app.store),
                                              inbox=app.store.inbox(),
                                              sources=app.store.settings(), last_tick=app.followup.last_tick,
                                              last_error=app.followup.last_error, notify=app.followup.notify,
                                              wechat_error=app.followup.wechat_error,
                                              scans=app.store.scans(), extraction_watch=app.store.scan_watch(),
                                              devices=app.devices.list(),
-                                             profiles=app.store.profiles(), insights=app.store.insights(),
+                                             insights=app.store.insights(),
                                              personalization=app.store.personalization(),
                                              briefings=Briefings(app.store).view(),
                                              wechat=app.followup.wechat is not None))
@@ -49,6 +55,8 @@ def serve(app, *, port=8773, public_port=None, interval=30):
                 if url.path == '/api/chats':
                     query = parse_qs(url.query).get('q', [None])[0]
                     return self.respond(app.chats(query or None))
+                if url.path == '/api/questions':
+                    return self.respond(app.questions.list())
                 if url.path.startswith('/api/events/'):
                     return self.respond(app.store.event(int(url.path.rsplit('/', 1)[1])))
                 if url.path.startswith('/api/tasks/'):
@@ -63,16 +71,15 @@ def serve(app, *, port=8773, public_port=None, interval=30):
         def do_POST(self):
             if urlparse(self.path).path.startswith(('/task/', '/calendar/', '/ingest/devices/')):
                 return self.route(update=True)
-            # A page on another origin must not be able to write local tasks or settings.
-            origin = self.headers.get('Origin')
-            allowed = {f'http://127.0.0.1:{server.server_port}', f'http://localhost:{server.server_port}'}
-            if origin is not None and origin not in allowed:
-                return self.respond(dict(error='只接受本地助理页面的操作'), 403)
-            if self.headers.get_content_type() != 'application/json':
-                return self.respond(dict(error='请使用 JSON 请求'), 415)
             try:
-                data = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+                data = self.request_data()
+                if data is None:
+                    return
                 path = urlparse(self.path).path
+                if path == '/api/questions':
+                    return self.respond(app.questions.ask(data), 202)
+                if path.startswith('/api/questions/') and path.endswith('/retry'):
+                    return self.respond(app.questions.retry(int(path.split('/')[3])), 202)
                 if path == '/api/devices':
                     device = app.devices.create(data)
                     device['url'] = (app.followup.public_url or
@@ -143,6 +150,8 @@ def serve(app, *, port=8773, public_port=None, interval=30):
     extractor.start()
     recommender = threading.Thread(target=app.proactive.run, args=(stop,), name='proactive', daemon=True)
     recommender.start()
+    question_worker = threading.Thread(target=app.questions.run, args=(stop,), name='memory-questions', daemon=True)
+    question_worker.start()
     print(f'个人助理：http://127.0.0.1:{server.server_port}/  数据：{app.store.path}', flush=True)
     if public:
         print(f'手机入口监听：127.0.0.1:{public.server_port}；任务详情与私人日程链接', flush=True)
@@ -161,3 +170,4 @@ def serve(app, *, port=8773, public_port=None, interval=30):
         executor.join(timeout=20)
         extractor.join(timeout=20)
         recommender.join(timeout=20)
+        question_worker.join(timeout=20)

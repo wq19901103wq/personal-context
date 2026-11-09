@@ -1,6 +1,7 @@
   <section class="panel calendar-panel" aria-label="日程表">
     <div class="panel-head calendar-head"><div><h2>日程表 <span id="calendar-zone" class="count"></span></h2><p id="week-label" class="muted"></p></div><div class="calendar-nav"><button id="week-prev" class="small" aria-label="上一周">←</button><button id="week-today" class="small">今天</button><button id="week-next" class="small" aria-label="下一周">→</button><button id="new-event" class="small primary">＋ 日程</button></div></div>
-    <div class="calendar-legend"><span>● 日程</span><span class="deadline-legend">● 待办截止</span><span id="week-count" class="muted"></span><span class="swipe-hint">右滑删除 · 重复日程整组操作</span></div>
+    <p id="calendar-import" class="muted" role="status" hidden></p>
+    <div class="calendar-legend"><span>● 日程</span><span class="deadline-legend">● 待办截止</span><span id="week-count" class="muted"></span><span class="swipe-hint">手动日程可右滑删除 · 重复日程整组操作</span></div>
     <div id="day-picker" class="day-picker" aria-label="选择日期"></div>
     <div id="calendar-days" class="calendar-days"></div>
     <details class="unscheduled" open><summary>待安排 <span id="unscheduled-count" class="count"></span></summary><p class="muted">尚未确定日期的日程和未设期限的待办，先放在这里。</p><div id="unscheduled-items"></div></details>
@@ -9,7 +10,7 @@
 <dialog id="item-actions" class="action-sheet" aria-labelledby="action-title">
   <div class="sheet-handle" aria-hidden="true"></div>
   <div class="sheet-top"><span id="action-kind" class="eyebrow"></span><button id="action-close" class="icon-button" aria-label="关闭操作面板" autofocus>×</button></div>
-  <h2 id="action-title"></h2><p id="action-meta" class="muted"></p>
+  <h2 id="action-title"></h2><p id="action-meta" class="muted"></p><p id="action-source" class="muted" hidden></p>
   <button id="action-primary" class="primary sheet-primary"></button>
   <section class="schedule-section"><h3 id="action-date-label"></h3><div id="action-dates" class="date-choices"></div>
     <div class="schedule-tools"><button id="action-pick-date" class="small">其他日期</button><button id="action-time-toggle" class="small">调整时间</button><button id="action-clear-date" class="small quiet">移回待安排</button></div>

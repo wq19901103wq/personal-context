@@ -1,6 +1,6 @@
 'use strict';
 let weekStart=null, selectedDay=null, editingEvent=null;
-let repeatDays=new Set();
+let repeatDays=new Set(),calendarRender=0;
 function dateKey(value,tz=state.sources.timezone||'Asia/Shanghai'){
   const parts=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value*1000));
   const get=k=>parts.find(p=>p.type===k).value;
@@ -15,7 +15,7 @@ function eventRange(event){
   if(event.starts_at==null)return [event.scheduled_date,event.scheduled_date];
   // All-day dates stay on their original local date when the display timezone changes.
   const tz=event.all_day?event.timezone:(state.sources.timezone||'Asia/Shanghai');
-  return [dateKey(event.starts_at,tz),dateKey(event.ends_at==null?event.starts_at:event.ends_at-0.001,tz)];
+  return [dateKey(event.starts_at,tz),dateKey(event.ends_at==null||event.ends_at<=event.starts_at?event.starts_at:event.ends_at-0.001,tz)];
 }
 function eventTime(event,key){
   if(event.starts_at==null)return event.scheduled_date?(periodLabel(event.time_period)||'当天')+' · 具体时间待定':event.time_text||'时间待定';
@@ -42,24 +42,30 @@ function calendarCard(item,kind,key){
   card.append(element('span',isTask?(item.due_at==null?'待办 · 未定期限':'截止 '+clock(item.due_at)):eventTime(item,key),'cal-time'),element('span',isTask?item.description:item.title,'cal-title'));
   const meta=isTask?(item.status==='waiting'?'等待回复':'待办'):([item.status==='tentative'?'待确认':'',item.location,recurrenceLabel(item),item.remind_before_minutes!=null?'提前 '+item.remind_before_minutes+' 分钟提醒':''].filter(Boolean).join(' · '));
   if(meta)card.append(element('span',meta,'cal-meta'));
+  if(item.source?.kind==='apple_calendar')card.append(element('span','Apple 日历 · '+item.source.name,'cal-meta'));
   return swipeItem(card,item,kind);
 }
 async function renderCalendar(){
+  const rendering=++calendarRender;
+  const imported=state.calendar_import,info=$('calendar-import');
+  info.hidden=!imported?.enabled&&!imported?.last_success_at;
+  info.textContent=imported?.enabled&&imported?.error?'Apple 日历暂未更新 · '+imported.error:
+    imported?.last_success_at?'Apple 日历'+(imported.enabled?'已同步 · ':'导入已暂停 · ')+stamp(imported.last_success_at,state.sources.timezone):'Apple 日历等待首次导入';
   const today=dateKey(Date.now()/1000);
   if(!weekStart){weekStart=monday(today);selectedDay=today;}
   const days=Array.from({length:7},(_,i)=>plusDays(weekStart,i));
   if(!days.includes(selectedDay))selectedDay=weekStart;
   $('calendar-zone').textContent=state.sources.timezone||'Asia/Shanghai';
-  $('week-label').textContent=weekStart.replaceAll('-','.')+' — '+days[6].slice(5).replace('-','.');
   const activeTasks=state.tasks.filter(t=>!['done','cancelled'].includes(t.status));
   const activeEvents=state.events.filter(e=>e.status!=='cancelled');
   const datedEvents=await api('/api/occurrences?start='+days[0]+'&end='+plusDays(days[6],1));
-  if(weekStart!==days[0])return;
+  if(rendering!==calendarRender||weekStart!==days[0])return;
+  $('week-label').textContent=weekStart.replaceAll('-','.')+' — '+days[6].slice(5).replace('-','.');
   const picker=$('day-picker'),grid=$('calendar-days');picker.replaceChildren();grid.replaceChildren();
   let count=new Set();
   for(let i=0;i<7;i++){
     const key=days[i],dayName=['一','二','三','四','五','六','日'][i];
-    const pick=button('',async()=>{selectedDay=key;await renderCalendar();},(key===selectedDay?'selected ':'')+(key===today?'is-today':''));
+    const pick=button('',()=>{selectedDay=key;renderCalendar().catch(e=>toast(e.message));},(key===selectedDay?'selected ':'')+(key===today?'is-today':''));
     pick.setAttribute('aria-label',key);pick.setAttribute('aria-pressed',String(key===selectedDay));
     pick.append(element('span','周'+dayName),element('b',String(Number(key.slice(8)))));picker.append(pick);
     const day=element('div',undefined,'calendar-day'+(key===today?' is-today':'')+(key===selectedDay?' selected':''));
@@ -84,6 +90,7 @@ function setEventInputType(allDay){
   for(const id of ['event-start','event-end']){const field=$(id),value=field.value;field.type=allDay?'date':'datetime-local';field.value=value?(allDay?value.slice(0,10):(value.length===10?value+'T00:00':value)):'';}
 }
 function editEvent(event=null){
+  if(event?.read_only){openEvent(event);return;}
   if(event?.recurrence)event=state.events.find(e=>e.id===event.id)||event;
   editingEvent=event;$('event-form').reset();$('event-error').textContent='';$('event-evidence').replaceChildren();
   $('event-date').value=event?.scheduled_date||'';$('event-period').value=event?.time_period||'';

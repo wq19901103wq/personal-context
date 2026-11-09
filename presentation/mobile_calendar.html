@@ -12,12 +12,12 @@ header{padding-bottom:8px}header .actions{margin:0}main{padding-top:12px}h1{font
 </style>
 <header><div class="brand"><span class="mark">↗</span>个人助理</div><button id="reload" class="small">刷新</button></header>
 <main>
-  <div class="intro"><h1>我的日程</h1><p id="sync-status" class="muted" role="status">正在读取安排…</p><p class="muted">点一下安排日期，右滑删除，误删可以撤销。</p></div>
+  <div class="intro"><h1>我的日程</h1><p id="sync-status" class="muted" role="status">正在读取安排…</p><p class="muted">点一下查看安排；手动日程可右滑删除，Apple 日历日程请在原日历中修改。</p></div>
   <p id="page-error" class="error" role="alert"></p>
   <!-- briefing -->
-<!-- calendar -->
+  <!-- calendar -->
   <!-- recommendations -->
-  <p class="footer">这是你的私人日程链接，持有链接的人可以查看和调整安排。微信发送 /日程 可再次获取。</p>
+  <p class="footer">这是你的私人助理链接，持有链接的人可以查看和调整安排。微信发送 /日程 可再次获取。</p>
 </main>
 <dialog id="task-dialog"><form id="task-form"><h2>调整待办</h2>
   <label for="task-title">待办内容</label><input id="task-title" required autocomplete="off">
@@ -30,6 +30,7 @@ header{padding-bottom:8px}header .actions{margin:0}main{padding-top:12px}h1{font
   <div class="dialog-actions"><button type="button" data-close="task-dialog">关闭</button><button type="submit" class="primary">保存待办</button></div>
 </form></dialog>
 <div id="toast" hidden role="status"></div>
+<script src="/assets/connection.js"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -42,11 +43,10 @@ function stamp(value,tz){return value==null?'未指定':new Intl.DateTimeFormat(
 function localValue(value,tz){if(value==null)return '';return new Intl.DateTimeFormat('sv-SE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000)).replace(' ','T');}
 async function api(path,data){
   const suffix=path==='/api/state'?'/data':path.replace(/^\/api/,'');
-  const options=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)};
-  const res=await fetch(calendarPath+suffix,options);const value=await res.json();if(!res.ok)throw Error(value.error||'操作失败');return value;
+  return pageConnection.request(calendarPath+suffix,data);
 }
 function recordEvidence(records,key){const d=element('details');d.dataset.key=key;d.append(element('summary','查看聊天原文'));for(const r of records){const q=element('div',undefined,'evidence');q.append(element('div',(r.actor.display_name||'未知发送者')+' · '+stamp(r.time.recorded_at),'muted'),element('div',r.text,'quote'),element('div','会话 '+r.stream_id+' · 消息 #'+r.id,'ref'));d.append(q);}return d;}
-async function refresh(){try{state=await api('/api/state');await renderCalendar();renderInsights();renderBriefings();$('page-error').textContent='';$('sync-status').textContent='已同步 · '+stamp(Date.now()/1000);}catch(error){$('page-error').textContent=error.message;$('sync-status').textContent='暂时无法同步，请刷新重试。';}}
+const refresh=pageConnection.poll(async()=>{state=await api('/api/state');await renderCalendar();renderInsights();renderBriefings();$('page-error').textContent='';$('sync-status').textContent='已同步 · '+stamp(Date.now()/1000);},{onError:error=>{$('page-error').textContent=error.message;$('sync-status').textContent='暂未同步 · 自动重连中';}});
 function editTask(task){
   editingTask=task;$('task-title').value=task.description;$('task-notes').value=task.notes;$('task-status').value=task.status;
   $('task-zone').textContent='时间所在时区：'+task.timezone;$('task-due').value=localValue(task.due_at,task.timezone);$('task-wake').value=localValue(task.wake_at,task.timezone);
@@ -61,6 +61,6 @@ $('reload').onclick=()=>refresh();
 <script src="/assets/recommendations.js"></script>
 <script src="/assets/briefing.js"></script>
 <script>
-refresh();setInterval(()=>{if(!document.hidden)refresh();},8000);
+refresh();
 </script>
 </html>

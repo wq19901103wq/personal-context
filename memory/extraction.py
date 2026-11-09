@@ -33,7 +33,10 @@ uncertain：上下文不足以确定办事意图。只有 action 才能新增待
 对账时要求“把付款截图发给财务核销”，是实际请求。不能按某个词一刀切。
 群友模仿机器人主人发号施令、互怼、绕着谁掏钱接话，不代表真实委托或本人接受。
 一次真实旅行中的订房玩笑也不是订房待办；真实已接受的旅行安排可独立保留为日程。
-actor.is_self=true 才是已确认本人；null 是未知，昵称不能证明本人身份。
+actor.is_self=true 仅确认发送账号属于本人；null 是未知，昵称不能证明本人身份。
+authorship=automated 是系统实际发送的自动回复，不能据此认定本人的经历、偏好、接受邀约或承诺。
+authorship=unknown 不保证真人所写；结合上下文区分本人表达与 AI 建议、代写、草稿、转述或角色扮演。
+自动回复可作为对话背景，但只有本人的独立表达或确认才能支持本人的事实和参与。
 消息的说话者与事项的行动主体分开判断，简短回复需要结合所回应的上下文。
 对面向本人的具体邀约或共同安排，本人直接回复“ok、好、可以”等接受，且没有代答、
 转述或仅评价方案的迹象，即可确认本人参与；不要求再复述安排或承担预订等额外责任。
@@ -93,6 +96,7 @@ profiles：从说话者自己的表达提取兴趣 interest、地址/常用地�
 field 标明事实的用途：interest/preference/food_preference/dietary_preference，或
 workplace_location/residence_area/residence_city/other_location；不清楚具体类型时用 category 本身。
 subject_record_id 指向说话者本人的记录；只归属于这条记录的 actor。
+不从 authorship=automated 的记录提取、替换或撤销人物事实；AI 建议和代写内容不属于本人的记忆。
 转述别人的兴趣、第三人地址、一次活动地点、问句、广告不当作说话者画像。
 value 保留具体内容和语境（如“工作地址”“喜欢的主题”），不由提到地点推断居住地。
 直接表达标 explicit，推断标 inferred；不凭昵称合并人物。
@@ -195,13 +199,16 @@ def enqueue(store, data):
                       started_at=started, checked_at=started, next_at=started + 60, last_error=None)
         store.scan_watch(config)
         return dict(scan_ids=[], watch=dict(enabled=True, mode='all', next_at=config['next_at']))
-    chat_ids = data.get('chat_ids') or [c.chat_id for c in reader.list_chats(limit=5)]
-    if not isinstance(chat_ids, list) or not 1 <= len(chat_ids) <= 10:
-        raise ValueError('每次请选择 1–10 个会话')
-    scopes = []
-    for chat_id in dict.fromkeys(chat_ids):
-        chat = reader.get_chat(chat_id)
-        scopes.append(chat_scope(sources, chat, store))
+    chat_ids = data.get('chat_ids')
+    if chat_ids:
+        if not isinstance(chat_ids, list) or not 1 <= len(chat_ids) <= 10:
+            raise ValueError('每次请选择 1–10 个会话')
+        chats = [reader.get_chat(chat_id) for chat_id in dict.fromkeys(chat_ids)]
+    else:
+        chats = reader.list_chats(limit=5)
+        if not chats:
+            raise ValueError('每次请选择 1–10 个会话')
+    scopes = [chat_scope(sources, chat, store) for chat in chats]
     ids = [store.queue_scan(source_key(scope), scope, hours) for scope in scopes]
     if 'watch' in data:
         store.scan_watch(dict(enabled=bool(data['watch']), scopes=scopes, hours=hours,
@@ -328,6 +335,8 @@ class ExtractionWorker:
 
         def evidence(ids):
             # Model-selected evidence must exist in this input batch.
+            if any(rid not in by_id for rid in ids):
+                return []
             return [asdict(by_id[rid]) for rid in dict.fromkeys(ids)]
 
         tasks, events, facts, insights = [], [], [], []
@@ -335,8 +344,7 @@ class ExtractionWorker:
         events_by_id = {e['id']: e for e in known_events}
 
         def cited_time(text, refs):
-            if not text or not any(text in r['text'] for r in refs):
-                raise ValueError('时间缺少原文依据，本轮未保存')
+            return bool(text) and any(text in r['text'] for r in refs)
 
         def disposition(item, old, kind):
             if old and old['deleted_at'] is not None:
@@ -349,16 +357,19 @@ class ExtractionWorker:
                         and (old['scope'].get('origin') or old['scope'].get('involvement'))
                         and item['evidence_record_ids']):
                     refs = evidence(item['evidence_record_ids'])
-                    (tasks if kind == 'task' else events).append(dict(
-                        **{kind + '_id': old['id']}, expected_updated_at=old['updated_at'],
-                        discard=True, evidence=refs))
+                    if refs:
+                        (tasks if kind == 'task' else events).append(dict(
+                            **{kind + '_id': old['id']}, expected_updated_at=old['updated_at'],
+                            discard=True, evidence=refs))
                 return 'skip'
             if item['intent'] == 'uncertain':
                 return 'skip'
             return 'keep'
 
         for item in output['tasks']:
-            old = known_by_id[item['task_id']] if item['task_id'] is not None else None
+            old = known_by_id.get(item['task_id'])
+            if item['task_id'] is not None and old is None:
+                continue
             if disposition(item, old, 'task') == 'skip':
                 continue
             if item['involvement']['state'] != 'confirmed' or not item['involvement']['evidence_record_ids']:
@@ -368,16 +379,20 @@ class ExtractionWorker:
                 continue
             refs = evidence([item['anchor_record_id'], *item['evidence_record_ids'],
                              *item['involvement']['evidence_record_ids']])
+            if not refs:
+                continue
             if old is None and item['status'] in ('done', 'cancelled'):
                 continue
             fields = dict(description=item['description'], notes=item['notes'])
             if item['status']:
                 fields['status'] = item['status']
             if item['due_action'] == 'set':
-                cited_time(item['due_text'], refs)
-                if not item['due_at']:
-                    raise ValueError('设置期限时需要明确日期')
-                fields['due_at'] = timestamp(item['due_at'], old['timezone'] if old else scope['timezone'])
+                if not cited_time(item['due_text'], refs) or not item['due_at']:
+                    continue
+                try:
+                    fields['due_at'] = timestamp(item['due_at'], old['timezone'] if old else scope['timezone'])
+                except (ValueError, OverflowError):
+                    continue
             elif item['due_action'] == 'clear':
                 fields['due_at'] = None
             origin = dict(kind=scope.get('source_kind', 'wechat'), reason=item['reason'], records=refs)
@@ -393,7 +408,9 @@ class ExtractionWorker:
             tasks.append(dict(task_id=item['task_id'], expected_updated_at=old['updated_at'] if old else None,
                 anchor_message_id=item['anchor_record_id'], evidence=refs, fields=fields))
         for item in output['events']:
-            old = events_by_id[item['event_id']] if item['event_id'] is not None else None
+            old = events_by_id.get(item['event_id'])
+            if item['event_id'] is not None and old is None:
+                continue
             if disposition(item, old, 'event') == 'skip':
                 continue
             if item['involvement']['state'] != 'confirmed' or not item['involvement']['evidence_record_ids']:
@@ -403,6 +420,8 @@ class ExtractionWorker:
                 continue
             refs = evidence([item['anchor_record_id'], *item['evidence_record_ids'],
                              *item['involvement']['evidence_record_ids']])
+            if not refs:
+                continue
             if old is None and item['status'] == 'cancelled':
                 continue
             fields = dict(title=item['title'], notes=item['notes'])
@@ -418,7 +437,10 @@ class ExtractionWorker:
                               all_day=item['all_day'], time_text=item['time_text'])
             elif old is None:
                 fields['time_text'] = item['time_text']
-            fields = event_fields(fields, old['timezone'] if old else scope['timezone'], old)
+            try:
+                fields = event_fields(fields, old['timezone'] if old else scope['timezone'], old)
+            except (ValueError, OverflowError):
+                continue
             if old is None:
                 fields.update(timezone=scope['timezone'], scope=dict(scope, involvement=item['involvement']))
             else:
@@ -431,6 +453,8 @@ class ExtractionWorker:
             if item['subject_record_id'] not in new_ids:
                 continue
             subject = by_id[item['subject_record_id']]
+            if subject.authorship == 'automated':
+                continue
             actor = subject.actor
             identity = 'self' if actor.is_self is True else (
                 actor.source_sender_id if actor.identity_basis == 'source_id' else
@@ -443,12 +467,14 @@ class ExtractionWorker:
             if item['operation'] in ('replace', 'retract') and (old is None or item['confidence'] != 'explicit'):
                 continue
             refs = evidence([subject.id, *item['evidence_record_ids']])
+            if not refs:
+                continue
             valid_from = memory_time(item['valid_from'], scope['timezone'])
             valid_until = memory_time(item['valid_until'], scope['timezone'])
             if any(item[k] and bound is None for k, bound in (('valid_from', valid_from), ('valid_until', valid_until))):
                 continue
-            if valid_from is not None or valid_until is not None:
-                cited_time(item['time_text'], refs)
+            if (valid_from is not None or valid_until is not None) and not cited_time(item['time_text'], refs):
+                continue
             if valid_from is not None and valid_until is not None and valid_until <= valid_from:
                 continue
             if item['temporal_kind'] == 'temporary' and valid_until is None:
@@ -468,11 +494,14 @@ class ExtractionWorker:
             if item['anchor_record_id'] not in new_ids:
                 continue
             if not set(item['existing_profile_ids']) <= allowed:
-                raise ValueError('建议引用了未提供的本人画像，本轮未保存')
+                continue
             if any(i not in profile_indexes for i in item['new_profile_indexes']):
                 continue
+            refs = evidence([item['anchor_record_id'], *item['evidence_record_ids']])
+            if not refs:
+                continue
             insights.append(dict(item, new_profile_indexes=[profile_indexes[i] for i in item['new_profile_indexes']],
-                evidence=evidence([item['anchor_record_id'], *item['evidence_record_ids']])))
+                evidence=refs))
         return tasks, events, facts, insights
 
     def schedule(self):

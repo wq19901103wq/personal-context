@@ -26,6 +26,7 @@ data/
 *.log.*
 *.worker.lock
 *.proactive.lock
+*.questions.lock
 
 # Private inputs, credentials and generated artifacts
 credentials/

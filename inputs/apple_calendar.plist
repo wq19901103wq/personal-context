@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>org.personal-context.apple-calendar-reader</string>
+  <key>CFBundleName</key><string>Personal Assistant Calendar Reader</string>
+  <key>CFBundleDisplayName</key><string>个人助理日历读取器</string>
+  <key>CFBundleExecutable</key><string>calendar-reader</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>只读导入 Apple／iCloud 日历，用于个人助理的日程表、每日简报和提醒；不会修改系统日历。</string>
+</dict></plist>

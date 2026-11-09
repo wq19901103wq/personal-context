@@ -17,6 +17,8 @@ class RawRecord:
     time: MessageTime
     text: str
     content_hash: str
+    # Account ownership does not identify the author of an outgoing message.
+    authorship: str = 'unknown'
 
 
 @dataclass(frozen=True)

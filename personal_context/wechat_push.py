@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
 
+SESSION_UNAVAILABLE = '微信会话不可用，请给 ClawBot 发一条消息后重试'
+SESSION_EXPIRED = '微信会话已过期，请给 ClawBot 发一条消息后重试'
+SESSION_ERRORS = (SESSION_UNAVAILABLE, SESSION_EXPIRED)
+
+
 class PushError(RuntimeError):
     def __init__(self, message, *, status='failed'):
         super().__init__(message)
@@ -119,7 +124,7 @@ class WeChatPush:
             if not _refreshed and self.refresh_context(request, state):
                 return self.send(text, client_id=client_id, recipient_id=recipient_id,
                                  bot_id=bot_id, _refreshed=True)
-            raise PushError('微信会话不可用，请给 ClawBot 发一条消息后重试', status='retry')
+            raise PushError(SESSION_UNAVAILABLE, status='retry')
         try:
             with self.opener.open(request, timeout=15) as response:
                 result = json.loads(response.read())
@@ -141,7 +146,7 @@ class WeChatPush:
                 if fresh and fresh != context:
                     return self.send(text, client_id=client_id, recipient_id=recipient_id,
                                      bot_id=bot_id, _refreshed=True)
-                raise PushError('微信会话已过期，请给 ClawBot 发一条消息后重试', status='retry')
+                raise PushError(SESSION_EXPIRED, status='retry')
             safe_codes = {key: value for key, value in codes.items() if isinstance(value, int)}
             raise PushError(f'微信未接受推送：{safe_codes}')
         if not codes and not result.get('message_id'):

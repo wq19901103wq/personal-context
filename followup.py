@@ -12,6 +12,7 @@ from inputs.wechat import SOURCE_ERRORS, history_reader, recent_messages, messag
 from memory.context import knowledge_context
 from presentation.push import PushDelivery, desktop_notification
 from briefing import Briefings
+from inputs.apple_calendar import AppleCalendar
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class FollowUp(PushDelivery):
         super().__init__(store, wechat=wechat, public_url=public_url,
                          briefings=Briefings(store, wechat=wechat), notifier=notifier)
         self.notify = notify
+        self.calendar = AppleCalendar(store)
         self.wechat_error = None
         self.lock = threading.Lock()
         self.last_tick = None
@@ -29,6 +31,7 @@ class FollowUp(PushDelivery):
     def tick(self, *, now=None):
         now = time.time() if now is None else now
         with self.lock, self.store.worker_lock():
+            self.calendar.sync(now=now)
             if self.wechat:
                 self.store.recover_wechat()
                 self.receive_wechat(now)

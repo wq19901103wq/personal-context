@@ -81,6 +81,9 @@ def main(argv=None):
     recommend = commands.add_parser('recommend', help='立即检索并保存推荐；不占后台日额度，仍按去重与推送时段处理')
     recommend.add_argument('--preview', action='store_true', help='只检索预览，不保存推荐或发微信')
     commands.add_parser('integrations', help='查看外部接口与 MCP 配置状态，不输出凭据、不联网')
+    calendar = commands.add_parser('calendar', help='只读导入本机 Apple／iCloud 日历')
+    calendar.add_argument('action', choices=('status', 'authorize', 'enable', 'disable', 'sync'), default='status', nargs='?')
+    calendar.add_argument('--calendar', dest='calendar_ids', action='append', help='enable 时指定日历 ID，可重复；默认全部本机账户日历')
     worker = commands.add_parser('worker', help='持续跟进，无页面')
     worker.add_argument('--interval', type=float, default=30)
     web = commands.add_parser('serve', help='本地页面与跟进进程')
@@ -95,7 +98,23 @@ def main(argv=None):
             return 0
         app = Assistant(args.db, notify=args.notify, wechat=args.wechat,
                         wechat_credentials=args.wechat_credentials, public_url=args.public_url)
-        if args.command == 'add':
+        if args.command == 'calendar':
+            calendar = app.followup.calendar
+            if args.action == 'authorize':
+                result = calendar.reader.authorize()
+            elif args.action in ('enable', 'disable'):
+                result = calendar.configure(enabled=args.action == 'enable',
+                    calendar_ids=(args.calendar_ids or []) if args.action == 'enable' else None)
+            elif args.action == 'sync':
+                with app.store.worker_lock():
+                    result = calendar.sync(force=True)
+                if result.get('error'):
+                    raise ValueError(result['error'])
+            else:
+                result = calendar.memory.status()
+                if calendar.reader.executable.is_file():
+                    result.update(calendar.reader.run('status'))
+        elif args.command == 'add':
             fields = vars(args).copy()
             fields['followup_seconds'] = args.every_hours * 3600
             result = app.create(fields)

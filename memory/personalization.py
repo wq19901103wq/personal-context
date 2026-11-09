@@ -21,10 +21,6 @@ FIELD_ALIASES = dict(interests='interest', hobby='interest', hobbies='interest',
     living_city='residence_city')
 
 
-def recommendation_time(events, now, timezone):
-    return next_recommendation_time(events, now, now + 1, timezone) == now
-
-
 def next_recommendation_time(events, now, expires_at, timezone):
     """Next daytime instant outside calendar occupancy and travel buffers."""
     tz = ZoneInfo(timezone)
