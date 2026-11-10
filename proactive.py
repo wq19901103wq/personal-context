@@ -141,8 +141,7 @@ class ProactiveWorker:
         prompt = dict(current_time=datetime.fromtimestamp(now, ZoneInfo(timezone)).isoformat(),
             timezone=timezone, personal_context=public_context, calendar_timeline=timeline,
             place_policy=dict(DEFAULT_POLICY, **self.store.personalization().get('place_policy', {})),
-            recent_recommendations=[dict(title=i['title'], url=i['url'])
-                for i in self.store.insights() if i['created_at'] > now - 7 * 86400])
+            recent_recommendations=self.store.recent_recommendations(now))
         return context, versions, prompt, occasions(context, events, now, timezone, timeline)
 
     async def resolve_location(self, prompt, trigger, context, stop):

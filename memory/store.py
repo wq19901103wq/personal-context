@@ -737,6 +737,11 @@ class TaskStore:
                 if profile_id in json.loads(row['profile_ids_json']):
                     db.execute("UPDATE insights SET notification_status='superseded' WHERE id=?", (row['id'],))
 
+    def recent_recommendations(self, now):
+        with self.connect() as db:
+            rows = db.execute('SELECT title,url,created_at FROM insights ORDER BY id DESC LIMIT 50').fetchall()
+        return [dict(title=r['title'], url=r['url']) for r in rows if r['created_at'] > now - 7 * 86400]
+
     def insights(self):
         with self.connect() as db:
             self.expire_insights_in(db, time.time())
